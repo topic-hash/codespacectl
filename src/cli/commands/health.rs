@@ -38,7 +38,7 @@ pub async fn handle(args: &Cli) -> crate::Result<i32> {
 
     // Load manifest + resolve secrets + gh binary.
     let (manifest, _manifest_path, manifest_dir) = load_manifest_for(args.manifest.as_deref())?;
-    let gh_bin = resolve_gh_bin(Some(&manifest_dir))?;
+    let gh_bin = resolve_gh_bin(Some(&manifest_dir)).await?;
 
     // Open SSH with a 60s connect timeout (separate from per-check timeout).
     let connect_timeout = Duration::from_secs(60);

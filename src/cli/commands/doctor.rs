@@ -8,7 +8,6 @@ use crate::cli::{Cli, OutputEnvelope, print_envelope};
 use crate::github::auth::{resolve_token, token_file_path};
 use crate::state::{load_state, state_file_path};
 use serde::Serialize;
-use std::path::PathBuf;
 use std::process::Command;
 
 /// Result of a single doctor check.
@@ -144,35 +143,15 @@ fn check_command(bin: &str, args: &[&str]) -> (bool, String) {
 /// Resolve the gh CLI binary path (mirrors `common::resolve_gh_bin` but
 /// returns a `DoctorCheck` instead of a `Result`).
 fn check_gh_bin() -> DoctorCheck {
-    // 1. Env var.
-    if let Ok(gh) = std::env::var("CODESPACECTL_GH_BIN") {
-        if !gh.is_empty() {
-            let exists = PathBuf::from(&gh).exists();
-            return DoctorCheck {
-                name: "gh_binary".into(),
-                ok: exists,
-                detail: format!("CODESPACECTL_GH_BIN={} (exists: {})", gh, exists),
-            };
-        }
-    }
-    // 2. PATH lookup.
-    if let Ok(path_var) = std::env::var("PATH") {
-        let sep = if cfg!(windows) { ';' } else { ':' };
-        for dir in path_var.split(sep) {
-            if dir.is_empty() {
-                continue;
-            }
-            let candidate = PathBuf::from(dir).join("gh");
-            if let Ok(meta) = std::fs::metadata(&candidate) {
-                if meta.is_file() {
-                    return DoctorCheck {
-                        name: "gh_binary".into(),
-                        ok: true,
-                        detail: candidate.display().to_string(),
-                    };
-                }
-            }
-        }
+    // Use the same find_gh_binary() helper that connect/exec use, so doctor
+    // reflects the actual gh discovery logic (env var, tools/bin/gh, cached
+    // download, PATH lookup). Returns the path if found.
+    if let Some(path) = crate::github::find_gh_binary() {
+        return DoctorCheck {
+            name: "gh_binary".into(),
+            ok: true,
+            detail: path.display().to_string(),
+        };
     }
     DoctorCheck {
         name: "gh_binary".into(),

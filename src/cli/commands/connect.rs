@@ -79,7 +79,7 @@ pub async fn handle(args: &Cli) -> crate::Result<i32> {
     }
 
     // 5. Resolve the gh binary path (env var, tools/bin/gh, or PATH).
-    let gh_bin = resolve_gh_bin(Some(&manifest_dir))?;
+    let gh_bin = resolve_gh_bin(Some(&manifest_dir)).await?;
 
     // 6. Establish the SSH session. Use the user's --timeout but at least 30s
     //    so a tight --timeout 60 doesn't preempt the SSH handshake prematurely.

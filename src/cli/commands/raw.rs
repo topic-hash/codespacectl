@@ -34,7 +34,7 @@ pub async fn handle(args: &Cli) -> crate::Result<i32> {
     // Load manifest (we use it for the session log's manifest_name label and
     // to resolve the manifest dir for tools/bin/gh lookup).
     let (manifest, _manifest_path, manifest_dir) = load_manifest_for(args.manifest.as_deref())?;
-    let gh_bin = resolve_gh_bin(Some(&manifest_dir))?;
+    let gh_bin = resolve_gh_bin(Some(&manifest_dir)).await?;
 
     // Open SSH session.
     let connect_timeout = Duration::from_secs(60);

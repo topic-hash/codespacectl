@@ -80,7 +80,7 @@ async fn run_pre_stop_hooks(
         return Ok(0);
     }
 
-    let gh_bin = resolve_gh_bin(Some(manifest_dir))?;
+    let gh_bin = resolve_gh_bin(Some(manifest_dir)).await?;
     let connect_timeout = Duration::from_secs(60);
     let mut ssh = CodespaceSsh::connect(codespace, &gh_bin, connect_timeout).await?;
     let ctx = resolve_template_context(manifest)?;

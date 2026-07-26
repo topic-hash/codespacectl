@@ -71,7 +71,7 @@ pub async fn handle(args: &Cli) -> crate::Result<i32> {
     }
 
     // Open SSH session.
-    let gh_bin = resolve_gh_bin(Some(&manifest_dir))?;
+    let gh_bin = resolve_gh_bin(Some(&manifest_dir)).await?;
     let connect_timeout = Duration::from_secs(60);
     let mut ssh = CodespaceSsh::connect(&codespace, &gh_bin, connect_timeout).await?;
 
@@ -142,7 +142,7 @@ async fn run_health_gate(
         return Ok(());
     }
 
-    let gh_bin = resolve_gh_bin(Some(manifest_dir))?;
+    let gh_bin = resolve_gh_bin(Some(manifest_dir)).await?;
     let connect_timeout = Duration::from_secs(60);
     let mut ssh = CodespaceSsh::connect(codespace, &gh_bin, connect_timeout).await?;
     let ctx = resolve_template_context(manifest)?;

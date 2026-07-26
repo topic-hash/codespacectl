@@ -32,10 +32,19 @@ pub async fn authed_client() -> Result<GitHubClient> {
 /// 3. `gh` found anywhere on `PATH`.
 ///
 /// Returns `CodespaceError::BinaryMissing` if none of the above succeeds.
-pub fn resolve_gh_bin(manifest_dir: Option<&Path>) -> Result<String> {
+/// Resolve the gh CLI binary path. Tries, in order:
+///   1. `CODESPACECTL_GH_BIN` env var (explicit override)
+///   2. `tools/bin/gh` relative to manifest dir (vendored)
+///   3. `gh` from PATH (system install)
+///   4. `~/.cache/codespacectl/bin/gh` (auto-downloaded by `ensure_gh_binary`)
+///
+/// If none are found, attempts to auto-download gh from GitHub releases.
+/// Returns the path to the gh binary, or an error if download fails or the
+/// platform is unsupported.
+pub async fn resolve_gh_bin(manifest_dir: Option<&Path>) -> Result<String> {
     // 1. Env var
     if let Ok(gh) = std::env::var("CODESPACECTL_GH_BIN") {
-        if !gh.is_empty() {
+        if !gh.is_empty() && PathBuf::from(&gh).exists() {
             return Ok(gh);
         }
     }
@@ -46,24 +55,13 @@ pub fn resolve_gh_bin(manifest_dir: Option<&Path>) -> Result<String> {
             return Ok(candidate.display().to_string());
         }
     }
-    // 3. gh from PATH
-    if let Ok(path_var) = std::env::var("PATH") {
-        let sep = if cfg!(windows) { ';' } else { ':' };
-        for dir in path_var.split(sep) {
-            if dir.is_empty() {
-                continue;
-            }
-            let candidate = PathBuf::from(dir).join("gh");
-            if let Ok(meta) = std::fs::metadata(&candidate) {
-                if meta.is_file() {
-                    return Ok(candidate.display().to_string());
-                }
-            }
-        }
+    // 3. gh from PATH or cached download (find_gh_binary checks both)
+    if let Some(path) = crate::github::find_gh_binary() {
+        return Ok(path.display().to_string());
     }
-    Err(CodespaceError::BinaryMissing(
-        "gh CLI not found (set CODESPACECTL_GH_BIN env var, place at tools/bin/gh next to manifest, or install gh in PATH)".into(),
-    ))
+    // 4. Auto-download from GitHub releases
+    let path = crate::github::ensure_gh_binary().await?;
+    Ok(path.display().to_string())
 }
 
 /// Load the manifest from `args_manifest` (if `Some`), else walk up from CWD
@@ -158,13 +156,13 @@ mod tests {
     /// no manifest_dir is given, and PATH contains no `gh`. We can't fully
     /// guarantee PATH state in a unit test, so we only assert the result is
     /// either Ok(String) or Err(BinaryMissing) — never another variant.
-    #[test]
-    fn test_resolve_gh_bin_returns_expected_variant() {
+    #[tokio::test]
+    async fn test_resolve_gh_bin_returns_expected_variant() {
         // Temporarily clear CODESPACECTL_GH_BIN so the env-var path is skipped.
         let prev = std::env::var_os("CODESPACECTL_GH_BIN");
         std::env::remove_var("CODESPACECTL_GH_BIN");
 
-        let r = resolve_gh_bin(None);
+        let r = resolve_gh_bin(None).await;
         match r {
             Ok(s) => assert!(!s.is_empty(), "gh_bin path should be non-empty"),
             Err(CodespaceError::BinaryMissing(_)) => { /* expected when gh absent */ }
@@ -176,14 +174,17 @@ mod tests {
         }
     }
 
-    /// `resolve_gh_bin` prefers `CODESPACECTL_GH_BIN` when set.
-    #[test]
-    fn test_resolve_gh_bin_prefers_env_var() {
+    /// `resolve_gh_bin` prefers `CODESPACECTL_GH_BIN` when set to an existing path.
+    /// (Since resolve_gh_bin now verifies the env var path exists, we point at
+    /// /bin/true which always exists on Unix.)
+    #[tokio::test]
+    async fn test_resolve_gh_bin_prefers_env_var_when_path_exists() {
         let prev = std::env::var_os("CODESPACECTL_GH_BIN");
-        std::env::set_var("CODESPACECTL_GH_BIN", "/custom/path/to/gh");
+        // Use /bin/true as a stand-in (exists, is executable)
+        std::env::set_var("CODESPACECTL_GH_BIN", "/bin/true");
 
-        let r = resolve_gh_bin(None).expect("env var should win");
-        assert_eq!(r, "/custom/path/to/gh");
+        let r = resolve_gh_bin(None).await.expect("env var should win when path exists");
+        assert_eq!(r, "/bin/true");
 
         match prev {
             Some(v) => std::env::set_var("CODESPACECTL_GH_BIN", v),
