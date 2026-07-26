@@ -111,7 +111,7 @@ pub fn validate_manifest(manifest: &Manifest) -> Result<()> {
 mod tests {
     use super::*;
     use super::super::schema::{
-        Command, Environment, GenerateConfig, HealthCheck, Hooks, HookCommand, Metadata, Secret,
+        Command, Environment, HealthCheck, Metadata, Secret,
     };
     use std::collections::HashMap;
 
@@ -206,7 +206,7 @@ hooks:
 
     #[test]
     fn test_parse_manifest_rejects_non_yaml() {
-        let err = parse_manifest("this is just plain text:\n   :::\n   : ::").unwrap_err();
+        let _ = parse_manifest("this is just plain text:\n   :::\n   : ::").unwrap_err();
         // Either YAML parse error (ManifestInvalid) or schema error.
         // `null` parses as an empty document, so use something the parser
         // definitely rejects.
