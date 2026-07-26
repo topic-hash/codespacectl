@@ -428,6 +428,221 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // ExecOutput does NOT derive Default. Document the "default-like" values
+    // (zero/empty) so a future reader knows what an unpopulated ExecOutput
+    // would look like if Default were ever added.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_exec_output_default_like_values() {
+        // Note: ExecOutput does NOT currently derive Default. If it ever does,
+        // the expected default values are: empty strings for all string
+        // fields, 0 for exit_code, 0.0 for duration_secs. This test pins that
+        // expectation.
+        let out = ExecOutput {
+            command_name: String::new(),
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: 0,
+            duration_secs: 0.0,
+            session_id: String::new(),
+        };
+        assert_eq!(out.command_name, "");
+        assert_eq!(out.stdout, "");
+        assert_eq!(out.stderr, "");
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(out.duration_secs, 0.0);
+        assert_eq!(out.session_id, "");
+    }
+
+    // -----------------------------------------------------------------------
+    // ExecOutput: deserialize from a JSON string with all fields populated.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_exec_output_deserializes_from_json() {
+        let json = r#"{
+            "command_name": "migrate",
+            "stdout": "rows=42\n",
+            "stderr": "warn: deprecated flag\n",
+            "exit_code": 0,
+            "duration_secs": 1.5,
+            "session_id": "11111111-2222-3333-4444-555555555555"
+        }"#;
+        let out: ExecOutput = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(out.command_name, "migrate");
+        assert_eq!(out.stdout, "rows=42\n");
+        assert_eq!(out.stderr, "warn: deprecated flag\n");
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(out.duration_secs, 1.5);
+        assert_eq!(out.session_id, "11111111-2222-3333-4444-555555555555");
+    }
+
+    // -----------------------------------------------------------------------
+    // ExecOutput: serialize to JSON, parse back as serde_json::Value, verify
+    // all field names match the struct fields exactly (snake_case).
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_exec_output_serializes_with_correct_field_names() {
+        let out = ExecOutput {
+            command_name: "raw".into(),
+            stdout: "out".into(),
+            stderr: "err".into(),
+            exit_code: 2,
+            duration_secs: 0.25,
+            session_id: "sid".into(),
+        };
+        let v = serde_json::to_value(&out).unwrap();
+        // Field names must be exactly these (snake_case from struct field names).
+        assert!(v.get("command_name").is_some());
+        assert!(v.get("stdout").is_some());
+        assert!(v.get("stderr").is_some());
+        assert!(v.get("exit_code").is_some());
+        assert!(v.get("duration_secs").is_some());
+        assert!(v.get("session_id").is_some());
+        // And there should be no extra fields.
+        assert_eq!(v.as_object().unwrap().len(), 6);
+    }
+
+    // -----------------------------------------------------------------------
+    // classify_ssh_err: preserves CommandFailed (does not reclassify).
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_classify_ssh_err_preserves_command_failed() {
+        let e = CodespaceError::CommandFailed {
+            exit_code: 127,
+            stderr: "command not found".into(),
+        };
+        let classified = classify_ssh_err(e, 30);
+        match classified {
+            CodespaceError::CommandFailed { exit_code, stderr } => {
+                assert_eq!(exit_code, 127);
+                assert_eq!(stderr, "command not found");
+            }
+            other => panic!("expected CommandFailed, got {:?}", other),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // classify_ssh_err: preserves NetworkError (does not reclassify).
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_classify_ssh_err_preserves_network_error() {
+        let e = CodespaceError::NetworkError("connection refused".into());
+        let classified = classify_ssh_err(e, 30);
+        assert!(matches!(
+            classified,
+            CodespaceError::NetworkError(ref msg) if msg == "connection refused"
+        ));
+    }
+
+    // -----------------------------------------------------------------------
+    // classify_ssh_err: preserves other error variants (TokenRevoked,
+    // CodespaceNotFound, etc.) — quick sanity check that they pass through.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_classify_ssh_err_preserves_other_variants_explicit() {
+        let cases: Vec<CodespaceError> = vec![
+            CodespaceError::TokenRevoked,
+            CodespaceError::TokenMissing,
+            CodespaceError::CodespaceNotFound("cs".into()),
+            CodespaceError::CodespaceUnreachable("down".into()),
+            CodespaceError::HostKeyMismatch {
+                expected: "a".into(),
+                actual: "b".into(),
+            },
+        ];
+        for e in cases {
+            // Re-create the input each iteration because classify_ssh_err
+            // takes ownership. Clone is not derived on all variants (e.g.
+            // some carry String), so we re-construct by hand.
+            // Note: codespacectl's CodespaceError derives Debug, so we can
+            // format the input for diagnostics.
+            let label = format!("{:?}", e);
+            let timeout_secs = 30;
+            let classified = classify_ssh_err(e, timeout_secs);
+            // Each of these should NOT be CommandTimeout (they should pass
+            // through unchanged). The specific variant is preserved by the
+            // `_ => e` catch-all arm.
+            assert!(
+                !matches!(classified, CodespaceError::CommandTimeout { .. }),
+                "{} should not be reclassified as CommandTimeout",
+                label
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // classify_ssh_err: Internal messages WITHOUT "timed out" pass through
+    // unchanged (the substring check is the discriminator).
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_classify_ssh_err_internal_without_timeout_passes_through() {
+        let e = CodespaceError::Internal("ssh error: channel_open_session failed".into());
+        let classified = classify_ssh_err(e, 30);
+        match classified {
+            CodespaceError::Internal(msg) => {
+                assert_eq!(msg, "ssh error: channel_open_session failed");
+            }
+            other => panic!("expected Internal, got {:?}", other),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // is_timeout: true for CommandTimeout.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_is_timeout_true_for_command_timeout() {
+        assert!(is_timeout(&CodespaceError::CommandTimeout { timeout_secs: 5 }));
+        assert!(is_timeout(&CodespaceError::CommandTimeout { timeout_secs: 0 }));
+        assert!(is_timeout(&CodespaceError::CommandTimeout { timeout_secs: 9999 }));
+    }
+
+    // -----------------------------------------------------------------------
+    // is_timeout: false for Internal (even when the message contains "timed
+    // out" — the caller is expected to run classify_ssh_err FIRST, which
+    // converts Internal("...timed out...") into CommandTimeout before
+    // is_timeout is ever called). This documents the contract.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_is_timeout_false_for_internal_even_with_timeout_message() {
+        let e = CodespaceError::Internal("ssh error: exec read loop timed out after 30s".into());
+        assert!(
+            !is_timeout(&e),
+            "is_timeout must NOT match Internal; classify_ssh_err is responsible for converting Internal(timed out) -> CommandTimeout first"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // is_timeout: false for CommandFailed.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_is_timeout_false_for_command_failed() {
+        let e = CodespaceError::CommandFailed {
+            exit_code: 1,
+            stderr: String::new(),
+        };
+        assert!(!is_timeout(&e));
+    }
+
+    // -----------------------------------------------------------------------
+    // is_timeout: false for NetworkError.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_is_timeout_false_for_network_error() {
+        let e = CodespaceError::NetworkError("connection reset".into());
+        assert!(!is_timeout(&e));
+    }
+
+    // -----------------------------------------------------------------------
+    // is_timeout: false for CodespaceUnreachable (retryable, but not a
+    // command timeout).
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_is_timeout_false_for_codespace_unreachable() {
+        let e = CodespaceError::CodespaceUnreachable("server down".into());
+        assert!(!is_timeout(&e));
+    }
+
+    // -----------------------------------------------------------------------
     // Compile-time test: the public API functions exist with the expected
     // parameter types. If a future edit drops a parameter or changes a type,
     // this stops compiling — the closure body has to call the function with

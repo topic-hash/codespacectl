@@ -282,3 +282,471 @@ impl fmt::Display for ErrorEnvelope {
         write!(f, "\n  → {}", self.suggested_action)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: build one instance of every CodespaceError variant so we can
+    /// parameterize tests across the full closed set of 18 variants.
+    fn all_variants() -> Vec<CodespaceError> {
+        vec![
+            CodespaceError::BinaryMissing("gh".into()),
+            CodespaceError::BinaryHashMismatch {
+                expected: "aaa".into(),
+                actual: "bbb".into(),
+            },
+            CodespaceError::AuthFailed("401".into()),
+            CodespaceError::TokenRevoked,
+            CodespaceError::TokenInvalidScope {
+                scope: "repo".into(),
+            },
+            CodespaceError::TokenMissing,
+            CodespaceError::CodespaceNotFound("foo".into()),
+            CodespaceError::CodespaceStartTimeout { elapsed_secs: 120 },
+            CodespaceError::CodespaceUnreachable("net".into()),
+            CodespaceError::HealthCheckFailed {
+                check: "db".into(),
+                exit_code: 1,
+                stderr: "boom".into(),
+            },
+            CodespaceError::CommandTimeout { timeout_secs: 30 },
+            CodespaceError::CommandFailed {
+                exit_code: 2,
+                stderr: "err".into(),
+            },
+            CodespaceError::HostKeyMismatch {
+                expected: "fp1".into(),
+                actual: "fp2".into(),
+            },
+            CodespaceError::ManifestInvalid("bad".into()),
+            CodespaceError::ManifestVersionUnsupported("v2".into()),
+            CodespaceError::ManifestNotFound("/x/CODESPACE.yaml".into()),
+            CodespaceError::NetworkError("conn refused".into()),
+            CodespaceError::Internal("oops".into()),
+        ]
+    }
+
+    /// Expected `kind()` strings in the same order as `all_variants()`.
+    const EXPECTED_KINDS: [&str; 18] = [
+        "binary_missing",
+        "binary_hash_mismatch",
+        "auth_failed",
+        "token_revoked",
+        "token_invalid_scope",
+        "token_missing",
+        "codespace_not_found",
+        "codespace_start_timeout",
+        "codespace_unreachable",
+        "health_check_failed",
+        "command_timeout",
+        "command_failed",
+        "host_key_mismatch",
+        "manifest_invalid",
+        "manifest_version_unsupported",
+        "manifest_not_found",
+        "network_error",
+        "internal_error",
+    ];
+
+    /// Expected `exit_code()` per variant in the same order as `all_variants()`.
+    const EXPECTED_EXIT_CODES: [i32; 18] = [
+        70, // BinaryMissing — internal
+        70, // BinaryHashMismatch — internal
+        70, // AuthFailed — internal
+        70, // TokenRevoked — internal
+        70, // TokenInvalidScope — internal
+        65, // TokenMissing — config
+        70, // CodespaceNotFound — internal
+        75, // CodespaceStartTimeout — temp
+        75, // CodespaceUnreachable — temp
+        70, // HealthCheckFailed — internal
+        75, // CommandTimeout — temp
+        70, // CommandFailed — internal
+        76, // HostKeyMismatch — protocol
+        65, // ManifestInvalid — config
+        65, // ManifestVersionUnsupported — config
+        65, // ManifestNotFound — config
+        75, // NetworkError — temp
+        70, // Internal — internal
+    ];
+
+    /// Per-variant expected retryable flag, in the same order as `all_variants()`.
+    const EXPECTED_RETRYABLE: [bool; 18] = [
+        false, // BinaryMissing
+        false, // BinaryHashMismatch
+        false, // AuthFailed
+        false, // TokenRevoked
+        false, // TokenInvalidScope
+        false, // TokenMissing
+        false, // CodespaceNotFound
+        true,  // CodespaceStartTimeout
+        true,  // CodespaceUnreachable
+        false, // HealthCheckFailed
+        true,  // CommandTimeout
+        false, // CommandFailed
+        false, // HostKeyMismatch
+        false, // ManifestInvalid
+        false, // ManifestVersionUnsupported
+        false, // ManifestNotFound
+        true,  // NetworkError
+        false, // Internal
+    ];
+
+    #[test]
+    fn test_kind_returns_correct_string_for_every_variant() {
+        let variants = all_variants();
+        assert_eq!(variants.len(), 18, "expected exactly 18 variants");
+        for (i, err) in variants.iter().enumerate() {
+            assert_eq!(
+                err.kind(),
+                EXPECTED_KINDS[i],
+                "variant #{} ({}) returned wrong kind",
+                i,
+                EXPECTED_KINDS[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_retryable_returns_true_only_for_designated_variants() {
+        let variants = all_variants();
+        for (i, err) in variants.iter().enumerate() {
+            assert_eq!(
+                err.retryable(),
+                EXPECTED_RETRYABLE[i],
+                "variant #{} ({}) returned wrong retryable",
+                i,
+                EXPECTED_KINDS[i]
+            );
+        }
+        // Sanity: only 4 should be retryable.
+        let retryable_count = variants.iter().filter(|e| e.retryable()).count();
+        assert_eq!(
+            retryable_count, 4,
+            "expected exactly 4 retryable variants, got {}",
+            retryable_count
+        );
+    }
+
+    #[test]
+    fn test_exit_code_returns_correct_sysexits_code() {
+        let variants = all_variants();
+        for (i, err) in variants.iter().enumerate() {
+            assert_eq!(
+                err.exit_code(),
+                EXPECTED_EXIT_CODES[i],
+                "variant #{} ({}) returned wrong exit code",
+                i,
+                EXPECTED_KINDS[i]
+            );
+        }
+    }
+
+    #[test]
+    fn test_suggested_action_non_empty_for_every_variant() {
+        for err in all_variants() {
+            let action = err.suggested_action();
+            assert!(
+                !action.is_empty(),
+                "suggested_action for {} was empty",
+                err.kind()
+            );
+        }
+    }
+
+    #[rstest::rstest]
+    #[case(CodespaceError::CodespaceStartTimeout { elapsed_secs: 5 })]
+    #[case(CodespaceError::CodespaceUnreachable("offline".into()))]
+    #[case(CodespaceError::CommandTimeout { timeout_secs: 60 })]
+    #[case(CodespaceError::NetworkError("refused".into()))]
+    fn test_retryable_variants(#[case] err: CodespaceError) {
+        assert!(err.retryable(), "expected {} to be retryable", err.kind());
+    }
+
+    #[rstest::rstest]
+    #[case(CodespaceError::BinaryMissing("gh".into()))]
+    #[case(CodespaceError::BinaryHashMismatch { expected: "a".into(), actual: "b".into() })]
+    #[case(CodespaceError::AuthFailed("x".into()))]
+    #[case(CodespaceError::TokenRevoked)]
+    #[case(CodespaceError::TokenInvalidScope { scope: "repo".into() })]
+    #[case(CodespaceError::TokenMissing)]
+    #[case(CodespaceError::CodespaceNotFound("x".into()))]
+    #[case(CodespaceError::HealthCheckFailed { check: "c".into(), exit_code: 1, stderr: "s".into() })]
+    #[case(CodespaceError::CommandFailed { exit_code: 1, stderr: "s".into() })]
+    #[case(CodespaceError::HostKeyMismatch { expected: "a".into(), actual: "b".into() })]
+    #[case(CodespaceError::ManifestInvalid("x".into()))]
+    #[case(CodespaceError::ManifestVersionUnsupported("v2".into()))]
+    #[case(CodespaceError::ManifestNotFound("/x".into()))]
+    #[case(CodespaceError::Internal("x".into()))]
+    fn test_non_retryable_variants(#[case] err: CodespaceError) {
+        assert!(!err.retryable(), "expected {} to NOT be retryable", err.kind());
+    }
+
+    // -------------------- From<std::io::Error> --------------------
+
+    #[test]
+    fn test_from_io_error_not_found_maps_to_network_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+        let err: CodespaceError = io_err.into();
+        assert_eq!(err.kind(), "network_error");
+        // io::ErrorKind::NotFound maps to NetworkError, which IS retryable.
+        assert!(err.retryable());
+        assert_eq!(err.exit_code(), 75);
+        let msg = err.to_string();
+        assert!(msg.contains("file not found") || msg.contains("file missing"));
+    }
+
+    #[test]
+    fn test_from_io_error_permission_denied_maps_to_network_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let err: CodespaceError = io_err.into();
+        assert_eq!(err.kind(), "network_error");
+    }
+
+    #[test]
+    fn test_from_io_error_other_kind_maps_to_network_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::Other, "boom");
+        let err: CodespaceError = io_err.into();
+        assert_eq!(err.kind(), "network_error");
+    }
+
+    #[rstest::rstest]
+    #[case(std::io::ErrorKind::ConnectionRefused)]
+    #[case(std::io::ErrorKind::ConnectionReset)]
+    #[case(std::io::ErrorKind::ConnectionAborted)]
+    #[case(std::io::ErrorKind::NotConnected)]
+    #[case(std::io::ErrorKind::BrokenPipe)]
+    #[case(std::io::ErrorKind::TimedOut)]
+    #[case(std::io::ErrorKind::Interrupted)]
+    #[case(std::io::ErrorKind::UnexpectedEof)]
+    #[case(std::io::ErrorKind::WriteZero)]
+    fn test_from_io_error_various_kinds(#[case] kind: std::io::ErrorKind) {
+        let io_err = std::io::Error::new(kind, "msg");
+        let err: CodespaceError = io_err.into();
+        assert_eq!(err.kind(), "network_error");
+    }
+
+    // -------------------- From<serde_json::Error> --------------------
+
+    #[test]
+    fn test_from_serde_json_error_produces_internal() {
+        let json_err = serde_json::from_str::<serde_json::Value>("{bad json").unwrap_err();
+        let err: CodespaceError = json_err.into();
+        assert_eq!(err.kind(), "internal_error");
+        assert!(!err.retryable());
+        assert_eq!(err.exit_code(), 70);
+    }
+
+    // -------------------- From<serde_yaml::Error> --------------------
+
+    #[test]
+    fn test_from_serde_yaml_error_produces_manifest_invalid() {
+        let yaml_err = serde_yaml::from_str::<serde_json::Value>(": : :").unwrap_err();
+        let err: CodespaceError = yaml_err.into();
+        assert_eq!(err.kind(), "manifest_invalid");
+        assert!(!err.retryable());
+        assert_eq!(err.exit_code(), 65);
+    }
+
+    // -------------------- From<reqwest::Error> --------------------
+
+    /// Construct a real `reqwest::Error` by asking a `Client` to build a
+    /// request from a malformed URL. `RequestBuilder::build` runs `IntoUrl`
+    /// eagerly and converts the parse failure into a `reqwest::Error` of
+    /// kind `InvalidUrl` (not a timeout, not a connect error). This is the
+    /// only category the `From<reqwest::Error>` impl classifies as a generic
+    /// `NetworkError` — so it's the easiest path to exercise that arm without
+    /// standing up a real HTTP server.
+    fn make_invalid_url_reqwest_error() -> reqwest::Error {
+        let client = reqwest::Client::new();
+        client
+            .get("not a url at all")
+            .build()
+            .expect_err("invalid URL should produce a reqwest::Error")
+    }
+
+    #[test]
+    fn test_from_reqwest_error_invalid_url_maps_to_network_error() {
+        let err: CodespaceError = make_invalid_url_reqwest_error().into();
+        assert_eq!(err.kind(), "network_error");
+        assert!(err.retryable(), "NetworkError is retryable");
+        assert_eq!(err.exit_code(), 75);
+    }
+
+    #[test]
+    fn test_from_reqwest_error_is_not_timeout_nor_connect() {
+        let raw = make_invalid_url_reqwest_error();
+        assert!(!raw.is_timeout(), "invalid URL error should not be a timeout");
+        assert!(!raw.is_connect(), "invalid URL error should not be a connect error");
+    }
+
+    // -------------------- ErrorEnvelope --------------------
+
+    #[test]
+    fn test_error_envelope_from_codespace_error_round_trips_fields() {
+        let err = CodespaceError::CodespaceStartTimeout { elapsed_secs: 42 };
+        let env = ErrorEnvelope::from(&err);
+        assert_eq!(env.kind, "codespace_start_timeout");
+        assert_eq!(env.retryable, true);
+        assert!(!env.suggested_action.is_empty());
+        // Context should be present (CodespaceStartTimeout has structured context).
+        assert!(env.context.is_some(), "context should be Some for CodespaceStartTimeout");
+        let ctx = env.context.unwrap();
+        assert_eq!(ctx["elapsed_secs"], 42);
+    }
+
+    #[test]
+    fn test_error_envelope_round_trips_for_non_contextual_variant() {
+        let err = CodespaceError::TokenMissing;
+        let env = ErrorEnvelope::from(&err);
+        assert_eq!(env.kind, "token_missing");
+        assert_eq!(env.retryable, false);
+        assert!(env.context.is_none(), "TokenMissing has no structured context");
+    }
+
+    #[test]
+    fn test_error_envelope_serializes_and_deserializes() {
+        let err = CodespaceError::HostKeyMismatch {
+            expected: "SHA256:aaa".into(),
+            actual: "SHA256:bbb".into(),
+        };
+        let env = ErrorEnvelope::from(&err);
+        let json = serde_json::to_string(&env).expect("serialize");
+        let back: ErrorEnvelope = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.kind, env.kind);
+        assert_eq!(back.message, env.message);
+        assert_eq!(back.retryable, env.retryable);
+        assert_eq!(back.suggested_action, env.suggested_action);
+        assert_eq!(back.context, env.context);
+    }
+
+    #[test]
+    fn test_error_envelope_round_trips_for_all_variants() {
+        for err in all_variants() {
+            let env = ErrorEnvelope::from(&err);
+            let json = serde_json::to_string(&env).expect("serialize");
+            let back: ErrorEnvelope = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(back.kind, env.kind);
+            assert_eq!(back.retryable, env.retryable);
+            assert_eq!(back.suggested_action, env.suggested_action);
+            assert_eq!(back.context, env.context);
+        }
+    }
+
+    #[test]
+    fn test_error_envelope_display_format() {
+        let err = CodespaceError::NetworkError("refused".into());
+        let env = ErrorEnvelope::from(&err);
+        let s = format!("{}", env);
+        assert!(s.contains("[network_error]"), "display should include kind, got: {}", s);
+        assert!(s.contains("refused"), "display should include message, got: {}", s);
+        assert!(s.contains("(retryable)"), "display should mark retryable, got: {}", s);
+        assert!(s.contains("→"), "display should include suggested action arrow, got: {}", s);
+    }
+
+    #[test]
+    fn test_error_envelope_display_non_retryable_no_marker() {
+        let err = CodespaceError::TokenMissing;
+        let env = ErrorEnvelope::from(&err);
+        let s = format!("{}", env);
+        assert!(!s.contains("(retryable)"), "non-retryable display should not include marker, got: {}", s);
+    }
+
+    // -------------------- context() --------------------
+
+    #[test]
+    fn test_context_returns_none_for_simple_variants() {
+        let simple_variants = vec![
+            CodespaceError::BinaryMissing("x".into()),
+            CodespaceError::AuthFailed("x".into()),
+            CodespaceError::TokenRevoked,
+            CodespaceError::TokenMissing,
+            CodespaceError::CodespaceNotFound("x".into()),
+            CodespaceError::CodespaceUnreachable("x".into()),
+            CodespaceError::ManifestInvalid("x".into()),
+            CodespaceError::ManifestVersionUnsupported("v2".into()),
+            CodespaceError::ManifestNotFound("/x".into()),
+            CodespaceError::NetworkError("x".into()),
+            CodespaceError::Internal("x".into()),
+        ];
+        for err in simple_variants {
+            assert!(err.context().is_none(), "{} should have no context", err.kind());
+        }
+    }
+
+    #[test]
+    fn test_context_returns_some_for_structured_variants() {
+        let structured_variants: Vec<CodespaceError> = vec![
+            CodespaceError::BinaryHashMismatch { expected: "a".into(), actual: "b".into() },
+            CodespaceError::TokenInvalidScope { scope: "repo".into() },
+            CodespaceError::CodespaceStartTimeout { elapsed_secs: 5 },
+            CodespaceError::HealthCheckFailed { check: "c".into(), exit_code: 1, stderr: "s".into() },
+            CodespaceError::CommandFailed { exit_code: 1, stderr: "s".into() },
+            CodespaceError::HostKeyMismatch { expected: "a".into(), actual: "b".into() },
+        ];
+        for err in structured_variants {
+            assert!(err.context().is_some(), "{} should have context", err.kind());
+        }
+    }
+
+    #[test]
+    fn test_context_binary_hash_mismatch_fields() {
+        let err = CodespaceError::BinaryHashMismatch {
+            expected: "abc".into(),
+            actual: "def".into(),
+        };
+        let ctx = err.context().unwrap();
+        assert_eq!(ctx["expected_sha256"], "abc");
+        assert_eq!(ctx["actual_sha256"], "def");
+    }
+
+    #[test]
+    fn test_context_health_check_failed_fields() {
+        let err = CodespaceError::HealthCheckFailed {
+            check: "db_ready".into(),
+            exit_code: 1,
+            stderr: "boom".into(),
+        };
+        let ctx = err.context().unwrap();
+        assert_eq!(ctx["check"], "db_ready");
+        assert_eq!(ctx["exit_code"], 1);
+        assert_eq!(ctx["stderr"], "boom");
+    }
+
+    #[test]
+    fn test_context_command_failed_fields() {
+        let err = CodespaceError::CommandFailed {
+            exit_code: 2,
+            stderr: "err".into(),
+        };
+        let ctx = err.context().unwrap();
+        assert_eq!(ctx["exit_code"], 2);
+        assert_eq!(ctx["stderr"], "err");
+    }
+
+    #[test]
+    fn test_context_host_key_mismatch_fields() {
+        let err = CodespaceError::HostKeyMismatch {
+            expected: "fp1".into(),
+            actual: "fp2".into(),
+        };
+        let ctx = err.context().unwrap();
+        assert_eq!(ctx["expected_fingerprint"], "fp1");
+        assert_eq!(ctx["actual_fingerprint"], "fp2");
+    }
+
+    #[test]
+    fn test_context_token_invalid_scope_fields() {
+        let err = CodespaceError::TokenInvalidScope { scope: "repo".into() };
+        let ctx = err.context().unwrap();
+        assert_eq!(ctx["missing_scope"], "repo");
+    }
+
+    #[test]
+    fn test_context_codespace_start_timeout_fields() {
+        let err = CodespaceError::CodespaceStartTimeout { elapsed_secs: 99 };
+        let ctx = err.context().unwrap();
+        assert_eq!(ctx["elapsed_secs"], 99);
+    }
+}

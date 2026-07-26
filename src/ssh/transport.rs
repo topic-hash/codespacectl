@@ -716,5 +716,147 @@ mod tests {
             std::env::remove_var("XDG_CACHE_HOME");
         }
     }
+
+    // -----------------------------------------------------------------------
+    // ssh_key_path: shape + location under the cache dir.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_ssh_key_path_ends_with_id_codespace() {
+        let path = ssh_key_path();
+        assert!(
+            path.ends_with("id_codespace"),
+            "ssh_key_path should end with 'id_codespace', got {}",
+            path.display()
+        );
+    }
+
+    #[test]
+    fn test_ssh_key_path_is_under_cache_dir() {
+        // Redirect XDG_CACHE_HOME to a tempdir so we can verify the path is
+        // located underneath whatever dir dirs::cache_dir() resolves to.
+        let tmp = tempfile::tempdir().expect("tempdir creation failed");
+        let prev = std::env::var_os("XDG_CACHE_HOME");
+        std::env::set_var("XDG_CACHE_HOME", tmp.path());
+
+        let path = ssh_key_path();
+        let cache_root = tmp.path();
+        assert!(
+            path.starts_with(cache_root),
+            "ssh_key_path should live under the cache dir, got {}",
+            path.display()
+        );
+        // Should be under a 'codespacectl' subdir.
+        assert!(
+            path.starts_with(cache_root.join("codespacectl")),
+            "ssh_key_path should be under cache_dir/codespacectl/, got {}",
+            path.display()
+        );
+
+        if let Some(v) = prev {
+            std::env::set_var("XDG_CACHE_HOME", v);
+        } else {
+            std::env::remove_var("XDG_CACHE_HOME");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // codespace_auto_key_path: shape + location under home/.ssh/.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_codespace_auto_key_path_ends_with_codespaces_auto() {
+        let path = codespace_auto_key_path();
+        assert!(
+            path.ends_with("codespaces.auto"),
+            "codespace_auto_key_path should end with 'codespaces.auto', got {}",
+            path.display()
+        );
+    }
+
+    #[test]
+    fn test_codespace_auto_key_path_is_under_home_ssh_dir() {
+        let path = codespace_auto_key_path();
+        let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
+        let expected_parent = home.join(".ssh");
+        assert!(
+            path.starts_with(&expected_parent),
+            "codespace_auto_key_path should live under ~/.ssh/, got {} (expected parent {})",
+            path.display(),
+            expected_parent.display()
+        );
+    }
+
+    #[test]
+    fn test_codespace_auto_key_path_is_deterministic() {
+        let p1 = codespace_auto_key_path();
+        let p2 = codespace_auto_key_path();
+        assert_eq!(p1, p2, "codespace_auto_key_path must be deterministic");
+    }
+
+    // -----------------------------------------------------------------------
+    // fake_ssh_dir: derives a sibling "fake-ssh" dir from the gh binary path.
+    // -----------------------------------------------------------------------
+    #[test]
+    fn test_fake_ssh_dir_with_absolute_path() {
+        let dir = CodespaceSsh::fake_ssh_dir("/path/to/tools/bin/gh");
+        assert_eq!(
+            dir,
+            std::path::PathBuf::from("/path/to/tools/bin/fake-ssh"),
+            "fake_ssh_dir should be sibling of gh binary's parent dir"
+        );
+    }
+
+    #[test]
+    fn test_fake_ssh_dir_with_relative_path() {
+        // Relative "gh" has no parent dir. On Linux, `Path::new("gh").parent()`
+        // returns `Some(Path::new(""))` (not `None`), so the `unwrap_or_else`
+        // fallback to "." is NOT triggered. Joining "" with "fake-ssh" yields
+        // just "fake-ssh" (no "./" prefix). The result is still a valid path
+        // relative to the current working directory — `Path::exists()` and
+        // `Command::env("PATH", ...)` resolve it the same way as "./fake-ssh".
+        let dir = CodespaceSsh::fake_ssh_dir("gh");
+        assert_eq!(
+            dir,
+            std::path::PathBuf::from("fake-ssh"),
+            "relative 'gh' should produce a relative 'fake-ssh' path"
+        );
+    }
+
+    #[test]
+    fn test_fake_ssh_dir_with_usr_bin_gh() {
+        let dir = CodespaceSsh::fake_ssh_dir("/usr/bin/gh");
+        assert_eq!(
+            dir,
+            std::path::PathBuf::from("/usr/bin/fake-ssh"),
+            "/usr/bin/gh should map to /usr/bin/fake-ssh"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // ClientHandler: fresh construction has None fingerprint, and the handle
+    // returned by fingerprint_handle() can be locked.
+    // -----------------------------------------------------------------------
+    #[tokio::test]
+    async fn test_client_handler_new_has_none_fingerprint() {
+        let handler = ClientHandler::new();
+        let guard = handler.host_key_fingerprint.lock().await;
+        assert!(
+            guard.is_none(),
+            "fresh ClientHandler should have host_key_fingerprint = None"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_client_handler_fingerprint_handle_is_lockable() {
+        let handler = ClientHandler::new();
+        let handle = handler.fingerprint_handle();
+        // Should be able to acquire the lock and write a value.
+        {
+            let mut guard = handle.lock().await;
+            *guard = Some("SHA256:test_value".to_string());
+        }
+        // Reading via the original Arc should reflect the write.
+        let guard = handler.host_key_fingerprint.lock().await;
+        assert_eq!(*guard, Some("SHA256:test_value".to_string()));
+    }
 }
 
