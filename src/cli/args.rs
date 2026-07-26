@@ -35,8 +35,30 @@ pub enum Commands {
         path: String,
     },
 
-    /// List codespaces for the authenticated user
-    Discover,
+    /// List codespaces for the authenticated user. With `--json` returns an array
+    /// suitable for selection. Combine with `codespacectl switch` to change current.
+    Discover {
+        /// Filter by repository (e.g. "topic-hash/DataMigrata"). Optional.
+        #[arg(long)]
+        repo: Option<String>,
+
+        /// Filter by state (e.g. "Available"). Optional.
+        #[arg(long)]
+        state: Option<String>,
+    },
+
+    /// Switch the current codespace. Without args: lists all codespaces for selection
+    /// (interactive in TTY, JSON array otherwise). With `--codespace <name>`: sets that
+    /// codespace as current in state (does NOT connect — use `connect` after).
+    Switch {
+        /// Codespace name to switch to (skips the selection list)
+        #[arg(long)]
+        codespace: Option<String>,
+
+        /// Pick the Nth entry from the discovery list (1-indexed). Useful for agents.
+        #[arg(long)]
+        index: Option<usize>,
+    },
 
     /// Connect to a codespace (start, hooks, health check)
     Connect {

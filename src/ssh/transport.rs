@@ -433,8 +433,12 @@ impl CodespaceSsh {
             .map_err(|e| SshError::ExecFailed(format!("channel_open_session: {}", e)))?;
 
         // want_reply = false: russh's wait() loop surfaces ExitStatus regardless.
+        // Wrap command in `bash -l -c '...'` so the codespace's profile is sourced
+        // (without this, `cargo`, `rustc`, `/opt/mssql-tools/bin/sqlcmd` etc. won't
+        // be on PATH — SSH exec sessions are non-login by default).
+        let wrapped = format!("bash -l -c '{}'", command.replace('\'', "'\\''"));
         channel
-            .exec(false, command.as_bytes())
+            .exec(false, wrapped.as_bytes())
             .await
             .map_err(|e| SshError::ExecFailed(format!("exec: {}", e)))?;
 

@@ -29,7 +29,12 @@ async fn dispatch(cli: &Cli) -> i32 {
         Commands::Init { path } => {
             codespacectl::cli::commands::init::handle(cli, path).await
         }
-        Commands::Discover => codespacectl::cli::commands::discover::handle(cli).await,
+        Commands::Discover { repo, state } => {
+            codespacectl::cli::commands::discover::handle(cli, repo, state).await
+        }
+        Commands::Switch { codespace, index } => {
+            codespacectl::cli::commands::switch::handle(cli, codespace, index).await
+        }
         Commands::Connect { .. } => codespacectl::cli::commands::connect::handle(cli).await,
         Commands::Health { .. } => codespacectl::cli::commands::health::handle(cli).await,
         Commands::Exec { .. } => codespacectl::cli::commands::exec::handle(cli).await,

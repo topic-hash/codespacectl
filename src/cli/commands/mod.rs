@@ -7,6 +7,7 @@
 pub mod common;
 pub mod init;
 pub mod discover;
+pub mod switch;
 pub mod connect;
 pub mod health;
 pub mod exec;

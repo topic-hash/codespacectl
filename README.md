@@ -123,8 +123,7 @@ On error:
 ## Documentation
 
 - [Manifest Specification](docs/MANIFEST_SPEC.md)
-- [CLI Reference](docs/CLI_REFERENCE.md)
-- [Error Catalog](docs/ERROR_CATALOG.md)
+- [CLI Reference](docs/CLI_REFERENCE.md) (includes Error Catalog)
 - [Architecture](docs/ARCHITECTURE.md)
 
 ## License

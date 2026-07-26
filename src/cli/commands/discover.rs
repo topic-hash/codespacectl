@@ -1,55 +1,97 @@
-//! Subcommand handler — `codespacectl discover`.
+//! Subcommand handler — `codespacectl discover [--repo <r>] [--state <s>]`.
 //!
-//! Lists all codespaces for the authenticated user via the GitHub Codespaces
-//! API and prints them as a table (or JSON array when `--json` is set).
+//! Lists all codespaces for the authenticated user via the GitHub Codespaces API.
+//! Supports optional filtering by repo or state. With `--json`, returns a stable
+//! array schema suitable for programmatic selection (use with `switch`).
 
-use crate::cli::{Cli, OutputEnvelope, print_envelope};
-use crate::state::{load_state, save_state};
+use crate::cli::args::*;
+use crate::cli::{OutputEnvelope, print_envelope};
+use crate::github::{GitHubClient, auth};
+use crate::state::{self, State};
+use crate::Result;
+use serde::Serialize;
 
-use super::common::authed_client;
+#[derive(Debug, Serialize)]
+struct DiscoverEntry {
+    index: usize,                  // 1-indexed for human display + `switch --index`
+    name: String,
+    display_name: Option<String>,
+    state: String,
+    repository: String,
+    created_at: String,
+    last_used_at: Option<String>,
+    is_current: bool,
+}
 
-/// Handle the `discover` subcommand.
-///
-/// Resolves the token, validates it, lists codespaces via the GitHub API, and
-/// updates `state.codespaces[name]` with the latest `last_known_state`,
-/// `last_checked_at`, and `created_at` (best-effort — state save errors are
-/// propagated, but the codespace table is still printed).
-pub async fn handle(args: &Cli) -> crate::Result<i32> {
-    let client = authed_client().await?;
+pub async fn handle(args: &Cli, repo_filter: &Option<String>, state_filter: &Option<String>) -> Result<i32> {
+    let token = auth::resolve_token()?;
+    let client = GitHubClient::new(token)?;
+    let _ = client.validate_token().await?;
     let codespaces = client.list_codespaces().await?;
 
-    // Update per-codespace state with the latest info from the API.
-    let mut state = load_state()?;
-    let now = chrono::Utc::now().to_rfc3339();
-    for cs in &codespaces {
-        let entry = state.codespaces.entry(cs.name.clone()).or_default();
-        entry.last_known_state = Some(cs.state.to_string());
-        entry.last_checked_at = Some(now.clone());
-        entry.created_at = Some(cs.created_at.clone());
-    }
-    save_state(&state)?;
+    // Load state to know which one is "current"
+    let state = state::load_state().unwrap_or_default();
+    let current = state.current_codespace.as_deref();
 
-    if args.json {
-        let envelope = OutputEnvelope::success(codespaces);
-        print_envelope(envelope);
-    } else {
-        if codespaces.is_empty() {
-            println!("No codespaces found.");
-        } else {
-            println!(
-                "{:<42} {:<12} {:<32} {:<25}",
-                "NAME", "STATE", "REPO", "CREATED"
-            );
-            for cs in &codespaces {
-                println!(
-                    "{:<42} {:<12} {:<32} {:<25}",
-                    cs.name,
-                    cs.state.to_string(),
-                    cs.repository.full_name,
-                    cs.created_at
-                );
+    // Apply filters + build entries
+    let mut entries: Vec<DiscoverEntry> = Vec::new();
+    for (i, cs) in codespaces.into_iter().enumerate() {
+        if let Some(repo) = repo_filter {
+            if !cs.repository.full_name.contains(repo.as_str()) {
+                continue;
             }
         }
+        if let Some(want_state) = state_filter {
+            if cs.state.to_string() != *want_state {
+                continue;
+            }
+        }
+        entries.push(DiscoverEntry {
+            index: i + 1,
+            name: cs.name.clone(),
+            display_name: cs.display_name.clone(),
+            state: cs.state.to_string(),
+            repository: cs.repository.full_name.clone(),
+            created_at: cs.created_at.clone(),
+            last_used_at: cs.last_used_at.clone(),
+            is_current: Some(cs.name.as_str()) == current,
+        });
+    }
+
+    if args.json {
+        let envelope = OutputEnvelope::success(&entries);
+        print_envelope(envelope);
+    } else {
+        if entries.is_empty() {
+            println!("No codespaces match the filter.");
+            return Ok(0);
+        }
+        // Header
+        println!(
+            "{:<4} {:<40} {:<14} {:<32} {:<24}",
+            "#", "NAME", "STATE", "REPO", "CREATED"
+        );
+        println!("{}", "-".repeat(120));
+        for e in &entries {
+            let marker = if e.is_current { "*" } else { " " };
+            println!(
+                "{}{:<3} {:<40} {:<14} {:<32} {:<24}",
+                marker, e.index, truncate(&e.name, 40), e.state,
+                truncate(&e.repository, 32), truncate(&e.created_at, 24)
+            );
+        }
+        println!();
+        println!("(*) = current codespace");
+        println!("Switch with: codespacectl switch --index <N>");
+        println!("Or:          codespacectl switch --codespace <name>");
     }
     Ok(0)
+}
+
+fn truncate(s: &str, n: usize) -> String {
+    if s.len() <= n {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..n.saturating_sub(3)])
+    }
 }
