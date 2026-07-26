@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (stable)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --check
+      - name: Clippy (advisory)
+        continue-on-error: true
+        run: cargo clippy -- -D warnings
+      - name: Build
+        run: cargo build --release --locked
+      - name: Unit tests
+        run: cargo test --lib -- --test-threads=1
+      - name: Integration tests
+        run: cargo test --test '*'
+
+  msrv:
+    name: MSRV (1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv-1.85
+      - name: Build on MSRV
+        run: cargo +1.85.0 build --release --locked
+      - name: Test on MSRV
+        run: cargo +1.85.0 test --lib -- --test-threads=1
