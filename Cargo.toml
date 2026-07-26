@@ -2,7 +2,7 @@
 name = "codespacectl"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.85"
 description = "Manifest-driven CLI for agent-driven GitHub Codespace operations"
 license = "MIT"
 repository = "https://github.com/topic-hash/codespacectl"
@@ -33,6 +33,11 @@ async-trait = "0.1"
 # HTTP client (GitHub API)
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 
+# Archive extraction (for auto-downloading gh CLI binary)
+flate2 = "1"
+tar = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -50,8 +55,9 @@ sha2 = "0.10"
 hex = "0.4"
 rand = "0.8"
 
-# Secret encryption at rest
-age = { version = "0.11", features = ["armor"] }
+# Secret encryption at rest (AES-256-GCM — replaces age to avoid the
+# i18n-embed-fl → proc-macro-error2 future-incompat transitive dep chain)
+aes-gcm = "0.10"
 
 # Filesystem / paths
 dirs = "5"

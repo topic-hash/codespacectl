@@ -7,7 +7,7 @@
 use crate::cli::args::*;
 use crate::cli::{OutputEnvelope, print_envelope};
 use crate::github::{GitHubClient, auth};
-use crate::state::{self, State};
+use crate::state;
 use crate::Result;
 use serde::Serialize;
 

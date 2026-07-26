@@ -2,7 +2,7 @@
 
 use super::State;
 use crate::{CodespaceError, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Get the state directory (`~/.cache/codespacectl/` on Linux, platform equivalents).
 pub fn state_dir() -> PathBuf {

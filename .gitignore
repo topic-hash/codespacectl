@@ -16,3 +16,8 @@ Thumbs.db
 .env.local
 token
 *.token
+
+# Vendored gh binary — NOT committed. Downloaded on first use via `codespacectl doctor`
+# or auto-fetched when CODESPACECTL_GH_BIN is not set.
+tools/bin/gh
+tools/bin/gh-*

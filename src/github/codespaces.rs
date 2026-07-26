@@ -98,6 +98,10 @@ pub struct CodespaceMachine {
 #[derive(Debug, Deserialize)]
 struct ListCodespacesResponse {
     codespaces: Vec<CodespaceInfo>,
+    /// Total count of codespaces (per GitHub API spec). Not used by codespacectl
+    /// — we use `codespaces.len()` instead — but the field must be present for
+    /// serde deserialization to succeed when the API returns it.
+    #[allow(dead_code)]
     total_count: u32,
 }
 
@@ -169,12 +173,10 @@ impl GitHubClient {
     ) -> Result<CodespaceInfo> {
         let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
         let mut attempts = 0u32;
-        let mut last_state = CodespaceState::Unknown;
 
         loop {
             attempts += 1;
             let info = self.get_codespace(name).await?;
-            last_state = info.state.clone();
             if info.state == target {
                 return Ok(info);
             }

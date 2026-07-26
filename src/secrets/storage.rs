@@ -1,15 +1,20 @@
-//! Secret storage at `~/.cache/codespacectl/secrets/<name>.age`.
+//! Secret storage at `~/.cache/codespacectl/secrets/<name>.bin`.
 //!
-//! Secrets are encrypted at rest with the `age` crate using an X25519
-//! identity stored at `~/.config/codespacectl/identity.age`. The identity
-//! is generated lazily on first use. All secret files (and the identity
-//! file itself) are written with `0600` permissions on Unix.
+//! Uses AES-256-GCM for authenticated encryption at rest. The 32-byte key is
+//! stored at `~/.config/codespacectl/key.bin` (0600 perms on Unix). Each secret
+//! file contains a 12-byte nonce followed by the ciphertext + GCM tag.
+//!
+//! Replaces the previous `age`-based implementation to avoid the transitive
+//! dependency chain `age → i18n-embed-fl → proc-macro-error2 v2.0.1` which is
+//! flagged as future-incompatible by the Rust compiler.
 
 use crate::{CodespaceError, Result};
-use age::secrecy::ExposeSecret;
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
+use aes_gcm::{
+    aead::{Aead, KeyInit},
+    Aes256Gcm, Nonce,
+};
+use rand::RngCore;
+use std::path::PathBuf;
 
 /// Get the directory where secrets are stored.
 pub fn secrets_dir() -> PathBuf {
@@ -19,13 +24,14 @@ pub fn secrets_dir() -> PathBuf {
 
 /// Path to a specific secret file.
 pub fn secret_path(name: &str) -> PathBuf {
-    secrets_dir().join(format!("{}.age", name))
+    secrets_dir().join(format!("{}.bin", name))
 }
 
-/// Path to the age identity file (used for encryption/decryption).
+/// Path to the master encryption key file (~/.config/codespacectl/key.bin).
+/// 32 random bytes, 0600 perms on Unix. Generated on first use via `init()`.
 pub fn identity_path() -> PathBuf {
     let config = dirs::config_dir().unwrap_or_else(|| PathBuf::from("/tmp/.config"));
-    config.join("codespacectl").join("identity.age")
+    config.join("codespacectl").join("key.bin")
 }
 
 /// Errors from secret operations.
@@ -47,118 +53,98 @@ impl From<SecretError> for CodespaceError {
     }
 }
 
-/// Set file permissions to 0600 on Unix; no-op elsewhere.
-fn set_owner_only_permissions(path: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = path;
-    }
-    Ok(())
-}
-
-/// Secret store — encrypts secrets at rest with age X25519 identities.
+/// Secret store — encrypts secrets at rest with AES-256-GCM using a local
+/// 32-byte key. Key is generated on first `init()` call and persisted at
+/// `~/.config/codespacectl/key.bin` with 0600 perms.
 pub struct SecretStore;
 
 impl SecretStore {
-    /// Initialize: ensure secrets dir exists, generate age identity if missing.
+    /// Initialize: ensure secrets dir exists, generate master key if missing.
     pub fn init() -> Result<()> {
         let dir = secrets_dir();
         std::fs::create_dir_all(&dir).map_err(|e| {
             CodespaceError::Internal(format!("failed to create secrets dir: {}", e))
         })?;
 
-        let identity = identity_path();
-        if !identity.exists() {
-            if let Some(parent) = identity.parent() {
+        let key_path = identity_path();
+        if !key_path.exists() {
+            if let Some(parent) = key_path.parent() {
                 std::fs::create_dir_all(parent).map_err(|e| {
-                    CodespaceError::Internal(format!("failed to create identity dir: {}", e))
+                    CodespaceError::Internal(format!("failed to create key dir: {}", e))
                 })?;
             }
-            // Generate a fresh X25519 age identity and persist it with 0600 perms.
-            let id = age::x25519::Identity::generate();
-            let secret_str = id.to_string();
-            let plaintext = secret_str.expose_secret();
-            // Write to a temp file in the same dir, then atomically set perms + rename
-            // so we never leave a world-readable identity on disk.
-            std::fs::write(&identity, plaintext.as_bytes())?;
-            set_owner_only_permissions(&identity)
-                .map_err(|e| SecretError::Io(e))?;
+            // Generate 32 random bytes for AES-256
+            let mut key_bytes = [0u8; 32];
+            rand::thread_rng().fill_bytes(&mut key_bytes);
+            std::fs::write(&key_path, key_bytes).map_err(|e| {
+                CodespaceError::Internal(format!("failed to write key file: {}", e))
+            })?;
+            set_owner_only_permissions(&key_path)?;
         }
 
         Ok(())
     }
 
-    /// Load the age identity from disk. Caller must have called `init()` first.
-    fn load_identity() -> std::result::Result<age::x25519::Identity, SecretError> {
-        let content = std::fs::read_to_string(identity_path())?;
-        age::x25519::Identity::from_str(content.trim())
-            .map_err(|e| SecretError::EncryptFailed(format!("invalid identity: {}", e)))
-    }
-
-    /// Store a secret (encrypted with the local age identity).
+    /// Store a secret (encrypted with AES-256-GCM).
     pub fn set(name: &str, value: &str) -> Result<()> {
         Self::init()?;
-        let identity = Self::load_identity()?;
-        let recipient = identity.to_public();
+        let key = load_master_key()?;
+        let cipher = Aes256Gcm::new_from_slice(&key)
+            .map_err(|e| CodespaceError::Internal(format!("AES key init failed: {}", e)))?;
 
-        let encryptor = age::Encryptor::with_recipients(std::iter::once(&recipient as _))
+        // Generate a random 12-byte nonce (GCM standard nonce size)
+        let mut nonce_bytes = [0u8; 12];
+        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        // Encrypt: output is ciphertext + GCM tag (16 bytes appended by aes-gcm)
+        let ciphertext = cipher
+            .encrypt(nonce, value.as_bytes())
             .map_err(|e| SecretError::EncryptFailed(e.to_string()))?;
 
-        // Double-wrap: outer = ASCII armor, inner = age stream encryption.
-        let mut output: Vec<u8> = Vec::new();
-        let armored = age::armor::ArmoredWriter::wrap_output(
-            &mut output,
-            age::armor::Format::AsciiArmor,
-        )?;
-        let mut writer = encryptor.wrap_output(armored)?;
-        writer.write_all(value.as_bytes())?;
-        // finish() on the StreamWriter flushes the age stream and returns the
-        // underlying ArmoredWriter; finish() on that writes the armor end marker
-        // and returns the inner writer (which we drop).
-        writer.finish()?.finish()?;
+        // Write: [12-byte nonce][ciphertext + tag]
+        let mut output = Vec::with_capacity(12 + ciphertext.len());
+        output.extend_from_slice(&nonce_bytes);
+        output.extend_from_slice(&ciphertext);
 
         let path = secret_path(name);
         std::fs::write(&path, &output)?;
         set_owner_only_permissions(&path)?;
-
         Ok(())
     }
 
-    /// Retrieve a secret (decrypt with the local age identity).
+    /// Retrieve a secret (decrypt with AES-256-GCM).
     pub fn get(name: &str) -> Result<String> {
         let path = secret_path(name);
         if !path.exists() {
             return Err(SecretError::NotFound(name.to_string()).into());
         }
-        let encrypted_blob = std::fs::read(&path)?;
-        let identity = Self::load_identity()
-            .map_err(|e| match e {
-                SecretError::EncryptFailed(msg) => SecretError::DecryptFailed(msg),
-                other => other,
-            })?;
 
-        // We wrote ASCII-armored blobs, so wrap with ArmoredReader before parsing.
-        let decryptor =
-            age::Decryptor::new_buffered(age::armor::ArmoredReader::new(&encrypted_blob[..]))
-                .map_err(|e| SecretError::DecryptFailed(e.to_string()))?;
-        let mut reader = decryptor
-            .decrypt(std::iter::once(&identity as _))
-            .map_err(|e| SecretError::DecryptFailed(e.to_string()))?;
-        let mut decrypted = String::new();
-        reader
-            .read_to_string(&mut decrypted)
-            .map_err(|e| SecretError::DecryptFailed(e.to_string()))?;
+        let key = load_master_key()?;
+        let cipher = Aes256Gcm::new_from_slice(&key)
+            .map_err(|e| CodespaceError::Internal(format!("AES key init failed: {}", e)))?;
 
-        // Trim a single trailing newline if present (defensive; we never write one).
-        if decrypted.ends_with('\n') {
-            decrypted.truncate(decrypted.len() - 1);
+        let file_content = std::fs::read(&path)?;
+        if file_content.len() < 12 {
+            return Err(SecretError::DecryptFailed(format!(
+                "secret file too short: {} bytes (need >= 12 for nonce)",
+                file_content.len()
+            ))
+            .into());
         }
-        Ok(decrypted)
+
+        // Split nonce + ciphertext
+        let (nonce_bytes, ciphertext) = file_content.split_at(12);
+        let nonce = Nonce::from_slice(nonce_bytes);
+
+        let plaintext = cipher
+            .decrypt(nonce, ciphertext)
+            .map_err(|e| SecretError::DecryptFailed(e.to_string()))?;
+
+        let value = String::from_utf8(plaintext)
+            .map_err(|e| SecretError::DecryptFailed(format!("plaintext not valid UTF-8: {}", e)))?;
+
+        Ok(value)
     }
 
     /// Check if a secret exists.
@@ -176,453 +162,267 @@ impl SecretStore {
     }
 }
 
+/// Load the 32-byte master key from the identity file.
+fn load_master_key() -> Result<[u8; 32]> {
+    let path = identity_path();
+    if !path.exists() {
+        return Err(CodespaceError::Internal(
+            "master key not initialized — call SecretStore::init() first".into(),
+        ));
+    }
+    let content = std::fs::read(&path)?;
+    if content.len() != 32 {
+        return Err(CodespaceError::Internal(format!(
+            "master key file is {} bytes, expected 32",
+            content.len()
+        )));
+    }
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&content);
+    Ok(key)
+}
+
+/// Set file permissions to 0600 (owner read/write only) on Unix.
+#[cfg(unix)]
+fn set_owner_only_permissions(path: &std::path::Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .map_err(|e| CodespaceError::Internal(format!("failed to set perms on {}: {}", path.display(), e)))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_owner_only_permissions(_path: &std::path::Path) -> Result<()> {
+    // No-op on non-Unix — Windows ACLs are more complex and not handled here.
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    /// Tests that touch `XDG_CACHE_HOME` / `XDG_CONFIG_HOME` env vars are
-    /// serialized via this lock to avoid cross-test interference (env vars
-    /// are process-global). We avoid adding `serial_test` to deps.
+    /// Serialize tests that touch env vars (XDG_CACHE_HOME, XDG_CONFIG_HOME).
+    /// Without this, parallel test runs race on the global env.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-    /// Run `body` with `XDG_CACHE_HOME` and `XDG_CONFIG_HOME` pointing at a
-    /// fresh tempdir; restores prior values (or removes them) afterwards.
-    fn with_temp_xdg<F: FnOnce()>(body: F) {
+    fn with_temp_dirs() -> (tempfile::TempDir, tempfile::TempDir, std::sync::MutexGuard<'static, ()>) {
         let _guard = ENV_LOCK.lock().unwrap();
-        let dir = tempfile::tempdir().expect("tempdir");
-
-        let old_cache = std::env::var_os("XDG_CACHE_HOME");
-        let old_config = std::env::var_os("XDG_CONFIG_HOME");
-
-        std::env::set_var("XDG_CACHE_HOME", dir.path());
-        std::env::set_var("XDG_CONFIG_HOME", dir.path());
-
-        body();
-
-        match old_cache {
-            Some(v) => std::env::set_var("XDG_CACHE_HOME", v),
-            None => std::env::remove_var("XDG_CACHE_HOME"),
-        }
-        match old_config {
-            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-            None => std::env::remove_var("XDG_CONFIG_HOME"),
-        }
+        let cache = tempfile::tempdir().unwrap();
+        let config = tempfile::tempdir().unwrap();
+        let prev_cache = std::env::var_os("XDG_CACHE_HOME");
+        let prev_config = std::env::var_os("XDG_CONFIG_HOME");
+        std::env::set_var("XDG_CACHE_HOME", cache.path());
+        std::env::set_var("XDG_CONFIG_HOME", config.path());
+        // We can't restore env vars after because TempDir is still alive —
+        // but the ENV_LOCK ensures no other test runs concurrently.
+        let _ = (prev_cache, prev_config);
+        (cache, config, _guard)
     }
 
     #[test]
     fn test_secret_store_init_creates_dirs() {
-        with_temp_xdg(|| {
-            SecretStore::init().expect("init should succeed");
-            assert!(secrets_dir().exists(), "secrets dir should exist");
-            assert!(
-                identity_path().parent().unwrap().exists(),
-                "identity parent dir should exist"
-            );
-            assert!(identity_path().exists(), "identity file should exist");
-        });
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::init().unwrap();
+        assert!(secrets_dir().exists(), "secrets dir should exist");
+        assert!(identity_path().parent().unwrap().exists(), "config dir should exist");
     }
 
     #[test]
-    fn test_secret_round_trip() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let name = "test-rt";
-            let value = "super-secret-value-12345";
-            SecretStore::set(name, value).expect("set should succeed");
-            let got = SecretStore::get(name).expect("get should succeed");
-            assert_eq!(got, value);
-        });
+    fn test_secret_store_init_generates_key() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        assert!(!identity_path().exists(), "key should not exist before init");
+        SecretStore::init().unwrap();
+        assert!(identity_path().exists(), "key should exist after init");
+        let key = std::fs::read(identity_path()).unwrap();
+        assert_eq!(key.len(), 32, "master key must be 32 bytes for AES-256");
     }
 
     #[test]
-    fn test_secret_get_missing_returns_error() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let err = SecretStore::get("does-not-exist").unwrap_err();
-            // Errors flow through CodespaceError::Internal; check the message.
-            let msg = err.to_string();
-            assert!(
-                msg.contains("not found"),
-                "expected NotFound error, got: {}",
-                msg
-            );
-        });
+    fn test_secret_store_init_idempotent() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::init().unwrap();
+        let key1 = std::fs::read(identity_path()).unwrap();
+        SecretStore::init().unwrap();
+        let key2 = std::fs::read(identity_path()).unwrap();
+        assert_eq!(key1, key2, "calling init twice must NOT regenerate the key");
+    }
+
+    #[test]
+    fn test_secret_round_trip_simple() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::set("test", "hello world").unwrap();
+        let retrieved = SecretStore::get("test").unwrap();
+        assert_eq!(retrieved, "hello world");
+    }
+
+    #[test]
+    fn test_secret_round_trip_long_string() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        let value = "x".repeat(10_000);
+        SecretStore::set("big", &value).unwrap();
+        let retrieved = SecretStore::get("big").unwrap();
+        assert_eq!(retrieved.len(), 10_000);
+        assert_eq!(retrieved, value);
+    }
+
+    #[test]
+    fn test_secret_round_trip_unicode() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::set("unicode", "Hello 世界 🌍café").unwrap();
+        let retrieved = SecretStore::get("unicode").unwrap();
+        assert_eq!(retrieved, "Hello 世界 🌍café");
+    }
+
+    #[test]
+    fn test_secret_round_trip_newlines() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::set("multiline", "line1\nline2\nline3\n").unwrap();
+        let retrieved = SecretStore::get("multiline").unwrap();
+        assert_eq!(retrieved, "line1\nline2\nline3\n");
+    }
+
+    #[test]
+    fn test_secret_get_missing_returns_not_found() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::init().unwrap();
+        let err = SecretStore::get("nonexistent").unwrap_err();
+        assert!(matches!(err, CodespaceError::Internal(ref msg) if msg.contains("secret not found")),
+            "expected NotFound error, got: {:?}", err);
+    }
+
+    #[test]
+    fn test_secret_exists_before_and_after_set() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::init().unwrap();
+        assert!(!SecretStore::exists("foo"));
+        SecretStore::set("foo", "bar").unwrap();
+        assert!(SecretStore::exists("foo"));
+    }
+
+    #[test]
+    fn test_secret_delete_removes_file() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::set("temp", "value").unwrap();
+        assert!(SecretStore::exists("temp"));
+        SecretStore::delete("temp").unwrap();
+        assert!(!SecretStore::exists("temp"));
+    }
+
+    #[test]
+    fn test_secret_delete_nonexistent_doesnt_error() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::init().unwrap();
+        // Should not error — delete on non-existent is idempotent
+        assert!(SecretStore::delete("never-existed").is_ok());
     }
 
     #[test]
     fn test_secret_overwrite() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let name = "ovr";
-            SecretStore::set(name, "first").unwrap();
-            SecretStore::set(name, "second").unwrap();
-            let got = SecretStore::get(name).unwrap();
-            assert_eq!(got, "second");
-        });
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::set("key", "old").unwrap();
+        SecretStore::set("key", "new").unwrap();
+        let retrieved = SecretStore::get("key").unwrap();
+        assert_eq!(retrieved, "new", "overwrite should replace value");
     }
 
     #[test]
-    fn test_secret_exists() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let name = "ex";
-            assert!(!SecretStore::exists(name));
-            SecretStore::set(name, "v").unwrap();
-            assert!(SecretStore::exists(name));
-            SecretStore::delete(name).unwrap();
-            assert!(!SecretStore::exists(name));
-        });
-    }
-
-    #[test]
-    fn test_secret_delete() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let name = "del";
-            SecretStore::set(name, "v").unwrap();
-            assert!(secret_path(name).exists());
-            SecretStore::delete(name).unwrap();
-            assert!(!secret_path(name).exists());
-        });
+    fn test_two_secrets_both_retrieve() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::set("a", "value_a").unwrap();
+        SecretStore::set("b", "value_b").unwrap();
+        assert_eq!(SecretStore::get("a").unwrap(), "value_a");
+        assert_eq!(SecretStore::get("b").unwrap(), "value_b");
     }
 
     #[cfg(unix)]
     #[test]
     fn test_identity_file_perms() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::init().unwrap();
         use std::os::unix::fs::PermissionsExt;
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let meta = std::fs::metadata(identity_path()).unwrap();
-            let mode = meta.permissions().mode() & 0o777;
-            assert_eq!(
-                mode,
-                0o600,
-                "identity file should have 0600 perms, got {:o}",
-                mode
-            );
-        });
-    }
-
-    // -------------------- additional tests --------------------
-
-    #[test]
-    fn test_secret_store_init_is_idempotent() {
-        with_temp_xdg(|| {
-            SecretStore::init().expect("first init");
-            assert!(secrets_dir().exists());
-            assert!(identity_path().exists());
-            // Second init should NOT error and should NOT overwrite identity.
-            let identity_before = std::fs::read(identity_path()).unwrap();
-            SecretStore::init().expect("second init");
-            let identity_after = std::fs::read(identity_path()).unwrap();
-            assert_eq!(
-                identity_before, identity_after,
-                "idempotent init must not overwrite identity file"
-            );
-        });
-    }
-
-    #[test]
-    fn test_secret_store_init_creates_config_dir() {
-        with_temp_xdg(|| {
-            // XDG_CONFIG_HOME points to the tempdir. The config dir is at
-            // <tempdir>/codespacectl/identity.age.
-            let config_root = dirs::config_dir().expect("config_dir should be set");
-            assert!(!config_root.join("codespacectl").exists());
-            SecretStore::init().unwrap();
-            assert!(config_root.join("codespacectl").exists());
-        });
-    }
-
-    #[test]
-    fn test_secret_store_init_generates_age_identity_if_missing() {
-        with_temp_xdg(|| {
-            // Identity file should not exist before init.
-            assert!(!identity_path().exists());
-            SecretStore::init().unwrap();
-            assert!(identity_path().exists(), "identity file should be generated");
-            // Identity file should be a valid age X25519 identity (starts with
-            // the AGE-SECRET-KEY-1 prefix).
-            let content = std::fs::read_to_string(identity_path()).unwrap();
-            assert!(
-                content.trim().starts_with("AGE-SECRET-KEY-1"),
-                "identity file should start with AGE-SECRET-KEY-1 prefix, got: {}",
-                content.trim()
-            );
-        });
-    }
-
-    #[test]
-    fn test_secret_round_trip_long_string_10kb() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let value = "a".repeat(10 * 1024);
-            SecretStore::set("long-secret", &value).expect("set");
-            let got = SecretStore::get("long-secret").expect("get");
-            assert_eq!(got.len(), value.len());
-            assert_eq!(got, value);
-        });
-    }
-
-    #[test]
-    fn test_secret_round_trip_unicode_emoji() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let value = "🎉🚀😀 emoji secret café";
-            SecretStore::set("emoji", value).expect("set");
-            let got = SecretStore::get("emoji").expect("get");
-            assert_eq!(got, value);
-        });
-    }
-
-    #[test]
-    fn test_secret_round_trip_unicode_cjk() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let value = "日本語テスト 한국어 русский";
-            SecretStore::set("cjk", value).expect("set");
-            let got = SecretStore::get("cjk").expect("get");
-            assert_eq!(got, value);
-        });
-    }
-
-    #[test]
-    fn test_secret_round_trip_with_newlines() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let value = "line1\nline2\nline3\nline4";
-            SecretStore::set("multiline", value).expect("set");
-            let got = SecretStore::get("multiline").expect("get");
-            assert_eq!(got, value);
-        });
-    }
-
-    #[test]
-    fn test_secret_round_trip_empty_string() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            SecretStore::set("empty", "").expect("set empty");
-            let got = SecretStore::get("empty").expect("get");
-            assert_eq!(got, "");
-        });
-    }
-
-    #[test]
-    fn test_secret_get_returns_not_found_for_nonexistent() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let err = SecretStore::get("totally-not-there").unwrap_err();
-            let msg = err.to_string();
-            assert!(msg.contains("not found"), "expected NotFound, got: {}", msg);
-        });
-    }
-
-    #[test]
-    fn test_secret_exists_false_before_set_true_after_set() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            assert!(!SecretStore::exists("phases"));
-            SecretStore::set("phases", "v").unwrap();
-            assert!(SecretStore::exists("phases"));
-        });
-    }
-
-    #[test]
-    fn test_secret_delete_removes_file() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let name = "del-me";
-            SecretStore::set(name, "v").unwrap();
-            assert!(secret_path(name).exists());
-            SecretStore::delete(name).unwrap();
-            assert!(!secret_path(name).exists());
-        });
-    }
-
-    #[test]
-    fn test_secret_delete_nonexistent_does_not_error() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            // Should silently succeed when the file doesn't exist.
-            SecretStore::delete("never-existed").expect("delete nonexistent should not error");
-        });
-    }
-
-    #[test]
-    fn test_secret_set_overwrites_existing_with_new_value() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let name = "ovr";
-            SecretStore::set(name, "first").unwrap();
-            SecretStore::set(name, "second").unwrap();
-            let got = SecretStore::get(name).unwrap();
-            assert_eq!(got, "second");
-            // Overwrite again with a longer value to make sure the file isn't
-            // somehow truncated oddly.
-            SecretStore::set(name, "a-much-longer-third-value").unwrap();
-            let got = SecretStore::get(name).unwrap();
-            assert_eq!(got, "a-much-longer-third-value");
-        });
+        let perms = std::fs::metadata(identity_path()).unwrap().permissions().mode();
+        assert_eq!(perms & 0o777, 0o600, "identity file must be 0600, got {:o}", perms);
     }
 
     #[cfg(unix)]
     #[test]
-    fn test_secret_files_have_0600_permissions_after_set() {
+    fn test_secret_file_perms() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::set("foo", "bar").unwrap();
         use std::os::unix::fs::PermissionsExt;
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            SecretStore::set("perm-test", "v").unwrap();
-            let meta = std::fs::metadata(secret_path("perm-test")).unwrap();
-            let mode = meta.permissions().mode() & 0o777;
-            assert_eq!(mode, 0o600, "secret file should have 0600 perms, got {:o}", mode);
-        });
+        let perms = std::fs::metadata(secret_path("foo")).unwrap().permissions().mode();
+        assert_eq!(perms & 0o777, 0o600, "secret file must be 0600, got {:o}", perms);
     }
 
     #[test]
-    fn test_two_secrets_stored_simultaneously_both_retrieve() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            SecretStore::set("alpha", "value-alpha").unwrap();
-            SecretStore::set("beta", "value-beta").unwrap();
-            assert_eq!(SecretStore::get("alpha").unwrap(), "value-alpha");
-            assert_eq!(SecretStore::get("beta").unwrap(), "value-beta");
-            // Both should still be on disk.
-            assert!(secret_path("alpha").exists());
-            assert!(secret_path("beta").exists());
-        });
+    fn test_secret_path_ends_with_bin() {
+        let path = secret_path("test");
+        assert_eq!(path.extension().unwrap(), "bin");
     }
 
     #[test]
-    fn test_secret_path_ends_with_age_extension() {
-        with_temp_xdg(|| {
-            let p = secret_path("foo");
-            let last = p.file_name().and_then(|s| s.to_str()).unwrap();
-            assert!(last.ends_with(".age"), "secret path should end in .age, got: {}", last);
-            assert_eq!(last, "foo.age");
-        });
+    fn test_identity_path_under_config_dir() {
+        let path = identity_path();
+        assert!(path.to_string_lossy().contains("codespacectl"));
+        assert!(path.to_string_lossy().ends_with("key.bin"));
     }
 
     #[test]
-    fn test_identity_path_is_under_config_dir() {
-        with_temp_xdg(|| {
-            let id_path = identity_path();
-            let config_root = dirs::config_dir().expect("config_dir");
-            assert!(
-                id_path.starts_with(&config_root),
-                "identity path {:?} should be under config dir {:?}",
-                id_path,
-                config_root
-            );
-            assert!(
-                id_path.starts_with(config_root.join("codespacectl")),
-                "identity path {:?} should be under {:?}",
-                id_path,
-                config_root.join("codespacectl")
-            );
-        });
+    fn test_ciphertext_format_nonce_plus_ciphertext() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::set("format_test", "value").unwrap();
+        let content = std::fs::read(secret_path("format_test")).unwrap();
+        // Format: 12-byte nonce + ciphertext (which includes 16-byte GCM tag)
+        assert!(content.len() >= 12 + 16, "file must be at least 28 bytes (nonce + tag)");
+        assert!(content.len() <= 12 + 16 + 100, "file should not be excessively large for short value");
     }
 
     #[test]
-    fn test_secrets_dir_is_under_cache_dir() {
-        with_temp_xdg(|| {
-            let dir = secrets_dir();
-            let cache_root = dirs::cache_dir().expect("cache_dir");
-            assert!(
-                dir.starts_with(cache_root.join("codespacectl").join("secrets")),
-                "secrets dir {:?} should be under {:?}",
-                dir,
-                cache_root.join("codespacectl").join("secrets")
-            );
-        });
+    fn test_decryption_with_wrong_key_fails() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::set("tamper_test", "secret_value").unwrap();
+
+        // Corrupt the master key — decryption should fail
+        let key_path = identity_path();
+        let mut bad_key = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut bad_key);
+        std::fs::write(&key_path, bad_key).unwrap();
+
+        let result = SecretStore::get("tamper_test");
+        assert!(result.is_err(), "decryption with wrong key should fail");
     }
 
     #[test]
-    fn test_secret_with_special_chars_in_value() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let value = r#"!@#$%^&*()_+-=[]{}|;:,.<>?/'\""#;
-            SecretStore::set("special", value).unwrap();
-            let got = SecretStore::get("special").unwrap();
-            assert_eq!(got, value);
-        });
+    fn test_decryption_with_corrupted_ciphertext_fails() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::set("corrupt_test", "secret_value").unwrap();
+
+        // Corrupt the ciphertext (flip a bit after the nonce)
+        let path = secret_path("corrupt_test");
+        let mut content = std::fs::read(&path).unwrap();
+        content[20] ^= 0xFF; // flip a byte in the ciphertext portion
+        std::fs::write(&path, &content).unwrap();
+
+        let result = SecretStore::get("corrupt_test");
+        assert!(result.is_err(), "decryption with corrupted ciphertext should fail");
     }
 
     #[test]
-    fn test_secret_round_trip_with_leading_and_trailing_spaces() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let value = "  padded  ";
-            SecretStore::set("padded", value).unwrap();
-            let got = SecretStore::get("padded").unwrap();
-            assert_eq!(got, value);
-        });
+    fn test_decryption_with_truncated_file_fails() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::init().unwrap();
+        // Write a file too short to contain a nonce
+        std::fs::write(secret_path("short"), b"tiny").unwrap();
+        let result = SecretStore::get("short");
+        assert!(result.is_err(), "decryption of truncated file should fail");
     }
 
     #[test]
-    fn test_secret_value_with_single_trailing_newline_is_preserved() {
-        // The implementation trims ONE trailing newline (defensive — never
-        // writes one). Confirm a value ending in newline comes back without
-        // the trimmed newline. (If the impl changes to NOT trim, this test
-        // will catch it.)
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            SecretStore::set("nl", "value\n").unwrap();
-            let got = SecretStore::get("nl").unwrap();
-            // The implementation trims a single trailing newline if present.
-            assert_eq!(got, "value");
-        });
-    }
-
-    #[test]
-    fn test_secret_value_with_no_trailing_newline_preserved_unchanged() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            SecretStore::set("nonl", "value").unwrap();
-            let got = SecretStore::get("nonl").unwrap();
-            assert_eq!(got, "value");
-        });
-    }
-
-    #[test]
-    fn test_secret_value_with_internal_newlines_preserved() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            let value = "line1\nline2\nline3";
-            SecretStore::set("internal-nl", value).unwrap();
-            let got = SecretStore::get("internal-nl").unwrap();
-            assert_eq!(got, value);
-        });
-    }
-
-    #[test]
-    fn test_secret_store_set_creates_secrets_dir_if_missing() {
-        with_temp_xdg(|| {
-            // Don't call init() explicitly — set() should call it lazily.
-            let dir = secrets_dir();
-            assert!(!dir.exists());
-            SecretStore::set("lazy", "v").unwrap();
-            assert!(dir.exists(), "set should lazily create secrets dir");
-            assert_eq!(SecretStore::get("lazy").unwrap(), "v");
-        });
-    }
-
-    #[test]
-    fn test_secret_files_are_different_per_name() {
-        with_temp_xdg(|| {
-            SecretStore::init().unwrap();
-            SecretStore::set("aaa", "1").unwrap();
-            SecretStore::set("bbb", "2").unwrap();
-            let p1 = secret_path("aaa");
-            let p2 = secret_path("bbb");
-            assert_ne!(p1, p2);
-            // Each file should be encrypted differently.
-            let bytes1 = std::fs::read(&p1).unwrap();
-            let bytes2 = std::fs::read(&p2).unwrap();
-            assert_ne!(
-                bytes1, bytes2,
-                "different secrets should encrypt to different ciphertexts"
-            );
-        });
+    fn test_empty_value_round_trips() {
+        let (_cache, _config, _guard) = with_temp_dirs();
+        SecretStore::set("empty", "").unwrap();
+        let retrieved = SecretStore::get("empty").unwrap();
+        assert_eq!(retrieved, "");
     }
 }

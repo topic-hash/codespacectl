@@ -101,7 +101,7 @@ pub async fn handle(args: &Cli, codespace_arg: &Option<String>, index_arg: &Opti
 fn pick_interactively(
     args: &Cli,
     codespaces: &[crate::github::CodespaceInfo],
-    state: &State,
+    _state: &State,
     previous: &Option<String>,
 ) -> Result<Option<String>> {
     if codespaces.is_empty() {
