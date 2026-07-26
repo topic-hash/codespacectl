@@ -5,8 +5,6 @@
 //! ("red").
 
 use crate::cli::{Cli, OutputEnvelope, SessionRef, print_envelope};
-use crate::github::auth::resolve_token;
-use crate::github::GitHubClient;
 use crate::health::{run_all_checks, HealthStatus};
 use crate::session::SessionLog;
 use crate::ssh::CodespaceSsh;
@@ -14,7 +12,8 @@ use crate::state::{load_state, save_state};
 use std::time::Duration;
 
 use super::common::{
-    load_manifest_for, resolve_codespace_name, resolve_gh_bin, resolve_template_context,
+    authed_client, load_manifest_for, resolve_codespace_name, resolve_gh_bin,
+    resolve_template_context,
 };
 
 /// Handle the `health` subcommand.
@@ -30,11 +29,11 @@ pub async fn handle(args: &Cli) -> crate::Result<i32> {
     };
     let codespace = resolve_codespace_name(codespace_arg.as_deref())?;
 
-    // Auth (we don't strictly need the client for SSH, but we validate the
-    // token here so a stale PAT surfaces as a clean error before SSH).
-    let token = resolve_token()?;
-    let client = GitHubClient::new(token)?;
-    client.validate_token().await?;
+    // Auth: `authed_client()` resolves the token, constructs the client, and
+    // validates the token via the trait. `_client` is unused after this — we
+    // keep the call uniform across handlers (per Wave 2 spec) so a stale PAT
+    // surfaces as a clean error before we open SSH for health checks.
+    let _client = authed_client().await?;
 
     // Load manifest + resolve secrets + gh binary.
     let (manifest, _manifest_path, manifest_dir) = load_manifest_for(args.manifest.as_deref())?;

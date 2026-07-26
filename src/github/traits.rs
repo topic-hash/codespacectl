@@ -13,7 +13,7 @@ use async_trait::async_trait;
 ///
 /// Implementations:
 /// - `GitHubClient` (production — uses reqwest + rustls)
-/// - `FakeGithubApiClient` (tests — in-memory state)
+/// - `FakeGithubApiClient` (tests — in-memory state, in `test_support`)
 #[async_trait]
 pub trait GithubApiClient: Send + Sync {
     /// Validate the token by calling /user. Returns the login username on success.
@@ -54,20 +54,30 @@ pub trait ShellExecutor: Send + Sync {
     async fn run(&self, program: &str, args: &[&str]) -> Result<String>;
 }
 
-#[cfg(test)]
-mod tests {
-    //! Tests for in-memory fake impls of the trait ports. These fakes are the
-    //! foundation for Wave 2's use-case-level tests (which will inject them as
-    //! dependencies). Wave 1 only verifies the fakes themselves behave
-    //! correctly — no use-case logic is exercised here.
+// -------------------------------------------------------------------------
+// Test support — public test fakes for use-case unit tests (Wave 2+).
+//
+// Importing this module from a sibling crate's `#[cfg(test)] mod tests` block
+// gives tests access to deterministic in-memory impls of `GithubApiClient`
+// and `ShellExecutor` without needing to mock HTTP or subprocess I/O.
+//
+// All items here are `#[cfg(test)]`-gated, so they compile out of release
+// builds entirely.
+// -------------------------------------------------------------------------
 
+#[cfg(test)]
+pub mod test_support {
     use super::*;
-    use crate::github::codespaces::{CodespaceInfo, CodespaceMachine, CodespaceRepo, CodespaceState};
+    use crate::github::codespaces::{
+        CodespaceInfo, CodespaceMachine, CodespaceRepo, CodespaceState,
+    };
     use crate::{CodespaceError, Result};
     use std::sync::Mutex;
 
     /// Build a minimal `CodespaceInfo` for tests, with the given name + state.
-    fn make_info(name: &str, state: CodespaceState) -> CodespaceInfo {
+    /// The repository is hardcoded to `owner/repo` (sufficient for tests that
+    /// don't care about repo filtering).
+    pub fn make_info(name: &str, state: CodespaceState) -> CodespaceInfo {
         CodespaceInfo {
             name: name.into(),
             state,
@@ -86,21 +96,59 @@ mod tests {
         }
     }
 
-    // -------------------------------------------------------------------------
+    /// Like `make_info` but lets the caller specify the repository `full_name`
+    /// (e.g. `"topic-hash/DataMigrata"`). Used by tests that filter by repo
+    /// substring.
+    pub fn make_info_with_repo(
+        name: &str,
+        state: CodespaceState,
+        repo_full_name: &str,
+    ) -> CodespaceInfo {
+        // Derive the repo short-name from the full name (last segment after `/`).
+        let short_name = repo_full_name
+            .split('/')
+            .last()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("repo");
+        CodespaceInfo {
+            name: name.into(),
+            state,
+            repository: CodespaceRepo {
+                full_name: repo_full_name.into(),
+                name: short_name.into(),
+            },
+            created_at: "2024-01-01T00:00:00Z".into(),
+            last_used_at: None,
+            display_name: None,
+            machine: Some(CodespaceMachine {
+                display_name: "small".into(),
+                cpus: 2,
+                memory_in_bytes: 4 * 1024 * 1024 * 1024,
+            }),
+        }
+    }
+
+    // ---------------------------------------------------------------------
     // FakeGithubApiClient — in-memory implementation of GithubApiClient.
-    // -------------------------------------------------------------------------
+    // ---------------------------------------------------------------------
 
     /// In-memory fake for `GithubApiClient`. Holds a `Vec<CodespaceInfo>`
     /// protected by a `Mutex` so it's `Send + Sync`.
     ///
     /// State transitions on `start_*` / `stop_*` are immediate (no async
     /// polling needed), making this suitable for deterministic unit tests.
-    struct FakeGithubApiClient {
-        codespaces: Mutex<Vec<CodespaceInfo>>,
+    ///
+    /// Wave 2 use-case tests construct one with `FakeGithubApiClient::new(seeded)`,
+    /// pass it to the use-case function as `&dyn GithubApiClient`, and assert
+    /// on the result. The `codespaces` field is `pub` so tests can also
+    /// introspect or mutate the seeded state directly when needed.
+    pub struct FakeGithubApiClient {
+        pub codespaces: Mutex<Vec<CodespaceInfo>>,
     }
 
     impl FakeGithubApiClient {
-        fn new(seeded: Vec<CodespaceInfo>) -> Self {
+        /// Construct with a seeded list of codespaces.
+        pub fn new(seeded: Vec<CodespaceInfo>) -> Self {
             Self {
                 codespaces: Mutex::new(seeded),
             }
@@ -193,6 +241,51 @@ mod tests {
         }
     }
 
+    // ---------------------------------------------------------------------
+    // FakeShellExecutor — records spawn calls, returns a seeded string.
+    // ---------------------------------------------------------------------
+
+    /// Minimal fake for `ShellExecutor`. Returns a hardcoded stdout string
+    /// regardless of input, and records the call args so tests can assert
+    /// the right program was invoked. The `calls` field is `pub` for
+    /// post-call inspection.
+    pub struct FakeShellExecutor {
+        pub seeded_stdout: String,
+        pub calls: Mutex<Vec<(String, Vec<String>)>>,
+    }
+
+    impl FakeShellExecutor {
+        pub fn new(seeded_stdout: &str) -> Self {
+            Self {
+                seeded_stdout: seeded_stdout.into(),
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ShellExecutor for FakeShellExecutor {
+        async fn run(&self, program: &str, args: &[&str]) -> Result<String> {
+            self.calls.lock().unwrap().push((
+                program.to_string(),
+                args.iter().map(|s| s.to_string()).collect(),
+            ));
+            Ok(self.seeded_stdout.clone())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests for in-memory fake impls of the trait ports. These fakes are the
+    //! foundation for Wave 2's use-case-level tests (which inject them as
+    //! dependencies). Wave 1 only verifies the fakes themselves behave
+    //! correctly — no use-case logic is exercised here.
+
+    use super::*;
+    use super::test_support::*;
+    use crate::CodespaceError;
+
     #[tokio::test]
     async fn test_fake_list_codespaces_returns_seeded_state() {
         let seeded = vec![
@@ -254,36 +347,15 @@ mod tests {
         );
     }
 
-    // -------------------------------------------------------------------------
-    // FakeShellExecutor — records spawn calls, returns a seeded string.
-    // -------------------------------------------------------------------------
-
-    /// Minimal fake for `ShellExecutor`. Returns a hardcoded stdout string
-    /// regardless of input, and records the call args so tests can assert
-    /// the right program was invoked.
-    struct FakeShellExecutor {
-        seeded_stdout: String,
-        calls: Mutex<Vec<(String, Vec<String>)>>,
-    }
-
-    impl FakeShellExecutor {
-        fn new(seeded_stdout: &str) -> Self {
-            Self {
-                seeded_stdout: seeded_stdout.into(),
-                calls: Mutex::new(Vec::new()),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl ShellExecutor for FakeShellExecutor {
-        async fn run(&self, program: &str, args: &[&str]) -> Result<String> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-            ));
-            Ok(self.seeded_stdout.clone())
-        }
+    #[tokio::test]
+    async fn test_make_info_with_repo_sets_full_name_and_short_name() {
+        let info = make_info_with_repo(
+            "alpha",
+            CodespaceState::Available,
+            "topic-hash/DataMigrata",
+        );
+        assert_eq!(info.repository.full_name, "topic-hash/DataMigrata");
+        assert_eq!(info.repository.name, "DataMigrata");
     }
 
     #[tokio::test]

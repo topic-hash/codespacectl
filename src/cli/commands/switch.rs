@@ -11,11 +11,12 @@
 
 use crate::cli::args::*;
 use crate::cli::{OutputEnvelope, print_envelope};
-use crate::github::{GitHubClient, auth};
 use crate::state::{self, State};
 use crate::{CodespaceError, Result};
 use serde::Serialize;
 use std::io::{self, BufRead, Write};
+
+use super::common::authed_client;
 
 #[derive(Debug, Serialize)]
 struct SwitchResult {
@@ -27,9 +28,12 @@ struct SwitchResult {
 }
 
 pub async fn handle(args: &Cli, codespace_arg: &Option<String>, index_arg: &Option<usize>) -> Result<i32> {
-    let token = auth::resolve_token()?;
-    let client = GitHubClient::new(token)?;
-    let _ = client.validate_token().await?;
+    // Wave 2: use the trait-injecting `authed_client()` helper (returns
+    // `Arc<dyn GithubApiClient>`). `validate_token()` is already done inside
+    // `authed_client()`, so we no longer call it explicitly here. Subsequent
+    // `client.list_codespaces()` / `client.get_codespace()` calls dispatch
+    // transparently via `Arc<dyn Trait>` auto-deref.
+    let client = authed_client().await?;
     let codespaces = client.list_codespaces().await?;
 
     let mut state = state::load_state().unwrap_or_default();

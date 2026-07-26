@@ -6,13 +6,11 @@
 
 use crate::cli::{Cli, OutputEnvelope, SessionRef, print_envelope};
 use crate::exec::exec_raw;
-use crate::github::auth::resolve_token;
-use crate::github::GitHubClient;
 use crate::session::SessionLog;
 use crate::ssh::CodespaceSsh;
 use std::time::Duration;
 
-use super::common::{load_manifest_for, resolve_codespace_name, resolve_gh_bin};
+use super::common::{authed_client, load_manifest_for, resolve_codespace_name, resolve_gh_bin};
 
 /// Handle the `raw` subcommand.
 pub async fn handle(args: &Cli) -> crate::Result<i32> {
@@ -26,10 +24,11 @@ pub async fn handle(args: &Cli) -> crate::Result<i32> {
     };
     let codespace = resolve_codespace_name(codespace_arg.as_deref())?;
 
-    // Auth (validate token so a stale PAT fails fast).
-    let token = resolve_token()?;
-    let client = GitHubClient::new(token)?;
-    client.validate_token().await?;
+    // Auth: `authed_client()` resolves the token, constructs the client, and
+    // validates the token via the trait. `_client` is unused after this — we
+    // keep the call uniform across handlers (per Wave 2 spec) so a stale PAT
+    // surfaces as a clean error before SSH.
+    let _client = authed_client().await?;
 
     // Load manifest (we use it for the session log's manifest_name label and
     // to resolve the manifest dir for tools/bin/gh lookup).

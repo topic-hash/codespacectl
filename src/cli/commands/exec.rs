@@ -6,8 +6,6 @@
 
 use crate::cli::{Cli, OutputEnvelope, SessionRef, print_envelope};
 use crate::exec::exec_command;
-use crate::github::auth::resolve_token;
-use crate::github::GitHubClient;
 use crate::health::{run_all_checks, HealthStatus};
 use crate::session::SessionLog;
 use crate::ssh::CodespaceSsh;
@@ -17,7 +15,8 @@ use crate::CodespaceError;
 use std::time::Duration;
 
 use super::common::{
-    load_manifest_for, resolve_codespace_name, resolve_gh_bin, resolve_template_context,
+    authed_client, load_manifest_for, resolve_codespace_name, resolve_gh_bin,
+    resolve_template_context,
 };
 
 /// Handle the `exec` subcommand.
@@ -34,10 +33,14 @@ pub async fn handle(args: &Cli) -> crate::Result<i32> {
     };
     let codespace = resolve_codespace_name(codespace_arg.as_deref())?;
 
-    // Auth (validate token so a stale PAT fails fast).
-    let token = resolve_token()?;
-    let client = GitHubClient::new(token)?;
-    client.validate_token().await?;
+    // Auth: `authed_client()` resolves the token, constructs the client, and
+    // validates the token via the trait. We bind to `_client` (underscore-
+    // prefixed) since this handler doesn't use the client for anything beyond
+    // the eager validation — the actual SSH/exec work below doesn't call the
+    // GitHub API. Keeping the call uniform across handlers (per Wave 2 spec)
+    // makes the diff minimal and surfaces a stale PAT with a clean error
+    // before we open an SSH session.
+    let _client = authed_client().await?;
 
     // Load manifest and look up the command.
     let (manifest, _manifest_path, manifest_dir) = load_manifest_for(args.manifest.as_deref())?;
