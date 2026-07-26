@@ -1,7 +1,10 @@
 //! CLI subcommand handlers.
 //!
-//! Wave 8 subagent: implement each handler.
+//! Each handler takes `&Cli` (so it has access to global `--json`, `--manifest`,
+//! `--verbose` flags) and the per-subcommand args it needs. `main.rs` does the
+//! dispatch by pattern-matching on `Commands` and forwarding.
 
+pub mod common;
 pub mod init;
 pub mod discover;
 pub mod connect;

@@ -7,7 +7,7 @@ use codespacectl::cli::{Cli, Commands};
 async fn main() {
     let cli = Cli::parse();
 
-    // Initialize tracing based on verbosity
+    // Initialize tracing based on verbosity.
     let filter = match cli.verbose {
         0 => "codespacectl=warn",
         1 => "codespacectl=info",
@@ -26,17 +26,19 @@ async fn main() {
 
 async fn dispatch(cli: &Cli) -> i32 {
     let result = match &cli.command {
-        Commands::Init { .. } => codespacectl::cli::commands::init::handle().await,
-        Commands::Discover => codespacectl::cli::commands::discover::handle().await,
-        Commands::Connect { .. } => codespacectl::cli::commands::connect::handle().await,
-        Commands::Health { .. } => codespacectl::cli::commands::health::handle().await,
-        Commands::Exec { .. } => codespacectl::cli::commands::exec::handle().await,
-        Commands::Raw { .. } => codespacectl::cli::commands::raw::handle().await,
-        Commands::Stop { .. } => codespacectl::cli::commands::stop::handle().await,
-        Commands::State { .. } => codespacectl::cli::commands::state::handle().await,
-        Commands::Session(_) => codespacectl::cli::commands::session::handle().await,
-        Commands::Doctor => codespacectl::cli::commands::doctor::handle().await,
-        Commands::Token(_) => codespacectl::cli::commands::token::handle().await,
+        Commands::Init { path } => {
+            codespacectl::cli::commands::init::handle(cli, path).await
+        }
+        Commands::Discover => codespacectl::cli::commands::discover::handle(cli).await,
+        Commands::Connect { .. } => codespacectl::cli::commands::connect::handle(cli).await,
+        Commands::Health { .. } => codespacectl::cli::commands::health::handle(cli).await,
+        Commands::Exec { .. } => codespacectl::cli::commands::exec::handle(cli).await,
+        Commands::Raw { .. } => codespacectl::cli::commands::raw::handle(cli).await,
+        Commands::Stop { .. } => codespacectl::cli::commands::stop::handle(cli).await,
+        Commands::State { .. } => codespacectl::cli::commands::state::handle(cli).await,
+        Commands::Session(_) => codespacectl::cli::commands::session::handle(cli).await,
+        Commands::Doctor => codespacectl::cli::commands::doctor::handle(cli).await,
+        Commands::Token(_) => codespacectl::cli::commands::token::handle(cli).await,
     };
 
     match result {
@@ -48,7 +50,7 @@ async fn dispatch(cli: &Cli) -> i32 {
                 codespacectl::cli::print_envelope(envelope);
             } else {
                 eprintln!("error: {}", e);
-                eprintln!("  → {}", e.suggested_action());
+                eprintln!("  -> {}", e.suggested_action());
             }
             exit_code
         }

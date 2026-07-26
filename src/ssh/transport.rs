@@ -47,6 +47,14 @@ pub fn ssh_key_path() -> PathBuf {
     super_key_dir().join("id_codespace")
 }
 
+/// Path to the codespace auto SSH key (~/.ssh/codespaces.auto).
+/// gh creates this on first call (via our fake ssh-keygen) and registers
+/// the public key with the codespace. We load this same key for russh auth.
+pub fn codespace_auto_key_path() -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
+    home.join(".ssh").join("codespaces.auto")
+}
+
 /// Directory holding codespacectl's cache artifacts (SSH key, state file).
 fn super_key_dir() -> PathBuf {
     let cache = dirs::cache_dir().unwrap_or_else(|| PathBuf::from("/tmp/.cache"));
@@ -251,6 +259,15 @@ pub struct CodespaceSsh {
 }
 
 impl CodespaceSsh {
+    /// Resolve the fake-ssh dir relative to the gh binary's location.
+    /// Layout: <gh_parent>/fake-ssh/{ssh, ssh-keygen}
+    ///   e.g. /path/to/tools/bin/gh  ->  /path/to/tools/bin/fake-ssh/
+    fn fake_ssh_dir(gh_bin: &str) -> std::path::PathBuf {
+        let gh_path = std::path::Path::new(gh_bin);
+        let parent = gh_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        parent.join("fake-ssh")
+    }
+
     /// Spawn `gh cs ssh -c <name> --stdio` and establish an SSH session.
     ///
     /// `gh_bin` is the path to the gh CLI binary (typically vendored at
@@ -267,6 +284,9 @@ impl CodespaceSsh {
         };
 
         // 1. Spawn `gh cs ssh -c <codespace_name> --stdio`.
+        // gh will generate ~/.ssh/codespaces.auto via ssh-keygen on first call
+        // (our fake ssh-keygen script handles that). We use that same key for
+        // russh auth below.
         let mut cmd = Command::new(gh_bin);
         cmd.args(["cs", "ssh", "-c", codespace_name, "--stdio"])
             .stdin(std::process::Stdio::piped())
@@ -283,6 +303,24 @@ impl CodespaceSsh {
             cmd.env("GH_TOKEN", token);
         }
 
+        // Prepend the fake-ssh dir to PATH so `gh`'s internal `exec.LookPath("ssh")`
+        // and `exec.LookPath("ssh-keygen")` succeed. The `--stdio` mode does NOT
+        // actually exec ssh — it only streams the SSH transport over stdin/stdout.
+        // We provide stub `ssh` + `ssh-keygen` scripts that satisfy the checks
+        // without doing any real SSH work.
+        let fake_ssh_dir = Self::fake_ssh_dir(gh_bin);
+        let new_path = if fake_ssh_dir.exists() {
+            let existing_path = std::env::var_os("PATH").unwrap_or_default();
+            let mut new_path = std::ffi::OsString::new();
+            new_path.push(&fake_ssh_dir);
+            new_path.push(":");
+            new_path.push(existing_path);
+            new_path
+        } else {
+            std::env::var_os("PATH").unwrap_or_default()
+        };
+        cmd.env("PATH", new_path);
+
         let mut child = cmd
             .spawn()
             .map_err(|e| SshError::SpawnFailed(format!("{}: {}", gh_bin, e)))?;
@@ -298,8 +336,26 @@ impl CodespaceSsh {
 
         let transport = SshTransport { stdin, stdout };
 
-        // 2. Ensure we have an Ed25519 keypair for auth.
-        let key_pair = ensure_ssh_key()?;
+        // 2. Load the SSH key gh creates at ~/.ssh/codespaces.auto.
+        // gh generates this key on first call (via our fake ssh-keygen), then
+        // registers the public key with the codespace via the GitHub API.
+        // We must use the SAME key for russh auth — gh has already registered it
+        // with the codespace's SSH server.
+        let key_path = codespace_auto_key_path();
+        // Wait briefly for gh to write the key (if first call). Poll up to 5s.
+        let mut waited_secs = 0u64;
+        while !key_path.exists() && waited_secs < 5 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            waited_secs += 1;
+        }
+        if !key_path.exists() {
+            return Err(SshError::KeyGenFailed(format!(
+                "gh did not create codespace auto key at {} within 5s",
+                key_path.display()
+            ))
+            .into());
+        }
+        let key_pair = load_ssh_key(&key_path)?;
 
         // 3. Build the russh client config.
         let config = russh::client::Config {
@@ -657,3 +713,4 @@ mod tests {
         }
     }
 }
+

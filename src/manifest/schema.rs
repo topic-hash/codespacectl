@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Top-level manifest structure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
+    #[serde(rename = "apiVersion")]
     pub api_version: String,
     pub metadata: Metadata,
     pub environment: Environment,
