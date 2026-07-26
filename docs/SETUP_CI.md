@@ -34,7 +34,7 @@ GitHub-hosted runners, so they require the `workflow` scope to push.
 5. Name the file `ci.yml` and commit
 6. Repeat for `release.yml`
 
-## Workflow file contents
+## Workflow file contents (current — Rust 1.85 MSRV + verification job)
 
 ### `.github/workflows/ci.yml`
 
@@ -53,6 +53,7 @@ concurrency:
 
 jobs:
   test:
+    name: Test (stable)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -67,16 +68,25 @@ jobs:
         run: cargo clippy -- -D warnings
       - name: Build
         run: cargo build --release --locked
-      - name: Test
+      - name: Unit tests
         run: cargo test --lib -- --test-threads=1
       - name: Integration tests
         run: cargo test --test '*'
-      - name: Upload binary
-        uses: actions/upload-artifact@v4
+
+  msrv:
+    name: MSRV (1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: Swatinem/rust-cache@v2
         with:
-          name: codespacectl-linux-amd64-debug
-          path: target/release/codespacectl
-          retention-days: 7
+          key: msrv-1.85
+      - name: Build on MSRV
+        run: cargo +1.85.0 build --release --locked
+      - name: Test on MSRV
+        run: cargo +1.85.0 test --lib -- --test-threads=1
+
 ```
 
 ### `.github/workflows/release.yml`
@@ -115,7 +125,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.85.0
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
@@ -134,7 +144,7 @@ jobs:
         if: matrix.target == 'x86_64-pc-windows-gnu'
         run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
       - name: Build
-        run: cargo build --release --locked --target ${{ matrix.target }}
+        run: cargo +1.85.0 build --release --locked --target ${{ matrix.target }}
       - name: Strip (non-Windows)
         if: matrix.archive != 'zip'
         run: strip target/${{ matrix.target }}/release/codespacectl
@@ -176,27 +186,36 @@ jobs:
             artifacts/*/codespacectl-*.tar.gz
             artifacts/*/codespacectl-*.zip
             artifacts/SHA256SUMS.txt
+
 ```
 
 ## What the workflows do
 
-### `ci.yml` (runs on every push/PR to main)
-- **Format check**: `cargo fmt --check` — fails if code isn't formatted
-- **Clippy**: `cargo clippy -- -D warnings` — runs as advisory (continue-on-error) since pre-existing warnings exist in transitive deps
-- **Build**: `cargo build --release --locked` — verifies the Cargo.lock is reproducible
-- **Tests**: `cargo test --lib -- --test-threads=1` — 423 unit tests, serialized because env-var-touching tests race otherwise
-- **Integration tests**: `cargo test --test '*'` — 73 tests via assert_cmd
-- **Artifact upload**: debug binary uploaded for 7 days for inspection
+### `ci.yml` — two parallel jobs
+
+**`test` job** (runs on every push/PR to main, uses Rust stable):
+- Format check: `cargo fmt --check`
+- Clippy (advisory, continue-on-error): `cargo clippy -- -D warnings`
+- Build: `cargo build --release --locked` (verifies Cargo.lock is reproducible)
+- Unit tests: `cargo test --lib -- --test-threads=1` (serialized because env-var-touching tests race otherwise)
+- Integration tests: `cargo test --test '*'` (assert_cmd-based CLI smoke tests)
+
+**`msrv` job** (runs on every push/PR to main, uses Rust 1.85.0):
+- Build: `cargo +1.85.0 build --release --locked`
+- Test: `cargo +1.85.0 test --lib -- --test-threads=1`
+- Verifies that the declared MSRV in `Cargo.toml` (`rust-version = "1.85"`) is real, not aspirational.
+- This catches the case where a transitive dependency bumps its MSRV above ours.
 
 ### `release.yml` (runs on tag push matching `v*`)
-- **5-target matrix cross-compile**:
+
+- 5-target cross-compile matrix using **Rust 1.85.0** (matches MSRV exactly):
   - `x86_64-unknown-linux-musl` (static Linux x86_64)
   - `aarch64-unknown-linux-musl` (static Linux ARM64)
   - `x86_64-apple-darwin` (macOS Intel)
   - `aarch64-apple-darwin` (macOS ARM/Apple Silicon)
   - `x86_64-pc-windows-gnu` (Windows x86_64 via mingw cross)
-- **Per-target**: install cross-compile toolchain, build, strip (non-Windows), package as tar.gz or zip + SHA-256 sidecar
-- **Aggregate release job**: merges all SHA-256s into `SHA256SUMS.txt`, creates GitHub Release with auto-generated notes
+- Per-target: install cross-compile toolchain, build `--release --locked`, strip (non-Windows), package as tar.gz or zip + SHA-256 sidecar
+- Aggregate release job: merges all SHA-256s into `SHA256SUMS.txt`, creates GitHub Release with auto-generated notes
 
 ## After setup: triggering the first release
 
