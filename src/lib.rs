@@ -19,3 +19,4 @@ pub mod ssh;
 pub mod state;
 
 pub use error::{CodespaceError, Result};
+pub use github::{GithubApiClient, ShellExecutor};

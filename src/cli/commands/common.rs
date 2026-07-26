@@ -6,6 +6,7 @@
 //! and secret-resolution-into-TemplateContext.
 
 use crate::github::auth::resolve_token;
+use crate::github::traits::GithubApiClient;
 use crate::github::GitHubClient;
 use crate::manifest::{find_manifest, parse_manifest_from_file, Manifest, TemplateContext};
 use crate::secrets::{generate_secret, SecretStore};
@@ -13,15 +14,22 @@ use crate::state::load_state;
 use crate::{CodespaceError, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-/// Resolve the GitHub token, build a `GitHubClient`, and validate the token.
+/// Resolve the GitHub token, build a `GitHubClient`, validate the token, and
+/// return it behind the `GithubApiClient` trait object.
 ///
-/// Used by every command that needs to talk to the GitHub Codespaces API.
-pub async fn authed_client() -> Result<GitHubClient> {
+/// Returning `Arc<dyn GithubApiClient>` (rather than the concrete
+/// `GitHubClient`) lets Wave 2 use-case handlers accept a trait-object
+/// parameter so test fakes can be injected. Wave 1 callers (connect.rs,
+/// stop.rs) still work unchanged — the trait methods on `Arc<dyn Trait>`
+/// dispatch transparently via auto-deref.
+pub async fn authed_client() -> Result<Arc<dyn GithubApiClient>> {
     let token = resolve_token()?;
     let client = GitHubClient::new(token)?;
-    client.validate_token().await?;
-    Ok(client)
+    // Validate via the trait (delegates to the inherent method on GitHubClient).
+    GithubApiClient::validate_token(&client).await?;
+    Ok(Arc::new(client))
 }
 
 /// Resolve the gh CLI binary path.

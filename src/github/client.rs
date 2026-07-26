@@ -2,6 +2,8 @@
 
 use crate::{CodespaceError, Result};
 use reqwest::{Client, StatusCode};
+use crate::github::codespaces::{CodespaceInfo, CodespaceState};
+use crate::github::traits::GithubApiClient;
 
 const API_BASE: &str = "https://api.github.com";
 
@@ -86,6 +88,55 @@ impl GitHubClient {
             }
             s => Err(CodespaceError::Internal(format!("HTTP {}: {}", s, body))),
         }
+    }
+}
+
+// -------------------------------------------------------------------------
+// Trait wiring — `GitHubClient` is the production impl of the
+// `GithubApiClient` port. Each trait method delegates to the matching
+// inherent `pub async fn` defined on `GitHubClient` itself (in `codespaces.rs`
+// and `auth.rs`). Inherent methods take precedence over trait methods in Rust's
+// name resolution, so there's no ambiguity / recursion.
+//
+// Wave 2 callers will receive `Arc<dyn GithubApiClient>` and dispatch via the
+// trait; Wave 1's existing callers continue to use the inherent methods
+// directly (they will be migrated in Wave 2).
+// -------------------------------------------------------------------------
+
+#[async_trait::async_trait]
+impl GithubApiClient for GitHubClient {
+    async fn validate_token(&self) -> Result<String> {
+        // Delegates to the inherent `GitHubClient::validate_token` defined in `auth.rs`.
+        self.validate_token().await
+    }
+
+    async fn list_codespaces(&self) -> Result<Vec<CodespaceInfo>> {
+        self.list_codespaces().await
+    }
+
+    async fn get_codespace(&self, name: &str) -> Result<CodespaceInfo> {
+        self.get_codespace(name).await
+    }
+
+    async fn start_codespace(&self, name: &str) -> Result<()> {
+        self.start_codespace(name).await
+    }
+
+    async fn stop_codespace(&self, name: &str) -> Result<()> {
+        self.stop_codespace(name).await
+    }
+
+    async fn wait_for_state(
+        &self,
+        name: &str,
+        target: CodespaceState,
+        timeout_secs: u64,
+    ) -> Result<CodespaceInfo> {
+        self.wait_for_state(name, target, timeout_secs).await
+    }
+
+    async fn ensure_running(&self, name: &str, timeout_secs: u64) -> Result<CodespaceInfo> {
+        self.ensure_running(name, timeout_secs).await
     }
 }
 
