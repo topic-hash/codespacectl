@@ -174,9 +174,15 @@ mod tests {
         assert_eq!(cs.last_checked_at.as_deref(), Some("2024-01-01T00:00:00Z"));
         assert_eq!(cs.created_at.as_deref(), Some("2024-01-01T00:00:00Z"));
         assert_eq!(cs.host_key_fingerprint.as_deref(), Some("SHA256:abc"));
-        assert_eq!(cs.host_key_stored_at.as_deref(), Some("2024-01-01T00:00:00Z"));
+        assert_eq!(
+            cs.host_key_stored_at.as_deref(),
+            Some("2024-01-01T00:00:00Z")
+        );
         assert_eq!(cs.last_health_status.as_deref(), Some("green"));
-        assert_eq!(cs.last_health_checked_at.as_deref(), Some("2024-01-01T00:00:00Z"));
+        assert_eq!(
+            cs.last_health_checked_at.as_deref(),
+            Some("2024-01-01T00:00:00Z")
+        );
     }
 
     #[test]

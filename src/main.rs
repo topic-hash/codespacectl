@@ -26,9 +26,7 @@ async fn main() {
 
 async fn dispatch(cli: &Cli) -> i32 {
     let result = match &cli.command {
-        Commands::Init { path } => {
-            codespacectl::cli::commands::init::handle(cli, path).await
-        }
+        Commands::Init { path } => codespacectl::cli::commands::init::handle(cli, path).await,
         Commands::Discover { repo, state } => {
             codespacectl::cli::commands::discover::handle(cli, repo, state).await
         }

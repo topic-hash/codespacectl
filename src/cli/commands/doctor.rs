@@ -4,7 +4,7 @@
 //! registered manifests, gh binary, network reachability to api.github.com)
 //! and reports the results. Exits 0 if all checks pass, 1 if any fail.
 
-use crate::cli::{Cli, OutputEnvelope, print_envelope};
+use crate::cli::{print_envelope, Cli, OutputEnvelope};
 use crate::github::auth::{resolve_token, token_file_path};
 use crate::state::{load_state, state_file_path};
 use serde::Serialize;
@@ -68,7 +68,10 @@ pub async fn handle(args: &Cli) -> crate::Result<i32> {
         detail: if state_exists {
             state_path.display().to_string()
         } else {
-            format!("{} (does not exist yet — will be created on first use)", state_path.display())
+            format!(
+                "{} (does not exist yet — will be created on first use)",
+                state_path.display()
+            )
         },
     });
 
@@ -108,11 +111,7 @@ pub async fn handle(args: &Cli) -> crate::Result<i32> {
             println!("All checks passed.");
         } else {
             let failed = checks.iter().filter(|c| !c.ok).count();
-            println!(
-                "{} of {} checks failed.",
-                failed,
-                checks.len()
-            );
+            println!("{} of {} checks failed.", failed, checks.len());
         }
     }
 
@@ -123,10 +122,9 @@ pub async fn handle(args: &Cli) -> crate::Result<i32> {
 /// either the trimmed stdout (on success) or an error message.
 fn check_command(bin: &str, args: &[&str]) -> (bool, String) {
     match Command::new(bin).args(args).output() {
-        Ok(o) if o.status.success() => (
-            true,
-            String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        ),
+        Ok(o) if o.status.success() => {
+            (true, String::from_utf8_lossy(&o.stdout).trim().to_string())
+        }
         Ok(o) => (
             false,
             format!(
@@ -156,7 +154,9 @@ fn check_gh_bin() -> DoctorCheck {
     DoctorCheck {
         name: "gh_binary".into(),
         ok: false,
-        detail: "gh not found (set CODESPACECTL_GH_BIN, place at tools/bin/gh, or install gh in PATH)".into(),
+        detail:
+            "gh not found (set CODESPACECTL_GH_BIN, place at tools/bin/gh, or install gh in PATH)"
+                .into(),
     }
 }
 

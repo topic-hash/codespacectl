@@ -200,21 +200,21 @@ fn extract_gh_from_tar_gz(bytes: &[u8]) -> Result<Vec<u8>> {
     let gz = GzDecoder::new(bytes);
     let mut archive = Archive::new(gz);
 
-    for entry in archive.entries().map_err(|e| {
-        CodespaceError::BinaryMissing(format!("tar entries: {}", e))
-    })? {
-        let mut entry = entry.map_err(|e| {
-            CodespaceError::BinaryMissing(format!("tar entry: {}", e))
-        })?;
-        let path = entry.path().map_err(|e| {
-            CodespaceError::BinaryMissing(format!("tar path: {}", e))
-        })?;
+    for entry in archive
+        .entries()
+        .map_err(|e| CodespaceError::BinaryMissing(format!("tar entries: {}", e)))?
+    {
+        let mut entry =
+            entry.map_err(|e| CodespaceError::BinaryMissing(format!("tar entry: {}", e)))?;
+        let path = entry
+            .path()
+            .map_err(|e| CodespaceError::BinaryMissing(format!("tar path: {}", e)))?;
         // Look for "bin/gh" inside the archive (e.g. gh_2.63.2_linux_amd64/bin/gh)
         if path.ends_with("bin/gh") {
             let mut buf = Vec::new();
-            entry.read_to_end(&mut buf).map_err(|e| {
-                CodespaceError::BinaryMissing(format!("read gh: {}", e))
-            })?;
+            entry
+                .read_to_end(&mut buf)
+                .map_err(|e| CodespaceError::BinaryMissing(format!("read gh: {}", e)))?;
             return Ok(buf);
         }
     }
@@ -225,22 +225,24 @@ fn extract_gh_from_tar_gz(bytes: &[u8]) -> Result<Vec<u8>> {
 }
 
 fn extract_gh_from_zip(bytes: &[u8]) -> Result<Vec<u8>> {
-    use std::io::{Read, Cursor};
+    use std::io::{Cursor, Read};
     let cursor = Cursor::new(bytes);
-    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| {
-        CodespaceError::BinaryMissing(format!("zip open: {}", e))
-    })?;
+    let mut archive = zip::ZipArchive::new(cursor)
+        .map_err(|e| CodespaceError::BinaryMissing(format!("zip open: {}", e)))?;
 
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| {
-            CodespaceError::BinaryMissing(format!("zip entry {}: {}", i, e))
-        })?;
+        let mut file = archive
+            .by_index(i)
+            .map_err(|e| CodespaceError::BinaryMissing(format!("zip entry {}: {}", i, e)))?;
         let name = file.name().to_string();
-        if name.ends_with("bin/gh.exe") || name.ends_with("bin/gh") || name == "gh.exe" || name == "gh" {
+        if name.ends_with("bin/gh.exe")
+            || name.ends_with("bin/gh")
+            || name == "gh.exe"
+            || name == "gh"
+        {
             let mut buf = Vec::new();
-            file.read_to_end(&mut buf).map_err(|e| {
-                CodespaceError::BinaryMissing(format!("read gh from zip: {}", e))
-            })?;
+            file.read_to_end(&mut buf)
+                .map_err(|e| CodespaceError::BinaryMissing(format!("read gh from zip: {}", e)))?;
             return Ok(buf);
         }
     }
@@ -258,7 +260,12 @@ mod tests {
     fn test_platform_asset_name_returns_some_for_supported() {
         let name = platform_asset_name();
         // Should always return Some on the test platform (linux x86_64, macOS, or windows)
-        assert!(name.is_some(), "platform_asset_name should return Some on {} {}", std::env::consts::OS, std::env::consts::ARCH);
+        assert!(
+            name.is_some(),
+            "platform_asset_name should return Some on {} {}",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        );
         let name = name.unwrap();
         assert!(name.starts_with("gh_2.63.2_"));
         assert!(name.ends_with(".tar.gz") || name.ends_with(".zip"));
@@ -294,8 +301,10 @@ mod tests {
         // Point at a non-existent path — should NOT return Some
         std::env::set_var("CODESPACECTL_GH_BIN", "/nonexistent/gh-binary");
         let result = find_gh_binary();
-        assert!(result.is_none() || result.unwrap().to_string_lossy() != "/nonexistent/gh-binary",
-            "should not return the non-existent env var path");
+        assert!(
+            result.is_none() || result.unwrap().to_string_lossy() != "/nonexistent/gh-binary",
+            "should not return the non-existent env var path"
+        );
         std::env::remove_var("CODESPACECTL_GH_BIN");
     }
 }

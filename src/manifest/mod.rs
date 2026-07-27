@@ -6,12 +6,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-pub mod schema;
 pub mod parser;
+pub mod schema;
 pub mod templates;
 
-pub use schema::*;
 pub use parser::{parse_manifest, parse_manifest_from_file, validate_manifest};
+pub use schema::*;
 pub use templates::{render_template, TemplateContext};
 
 /// Loaded manifest with its source path and content hash.

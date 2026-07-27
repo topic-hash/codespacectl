@@ -191,7 +191,9 @@ mod tests {
         // Use /bin/true as a stand-in (exists, is executable)
         std::env::set_var("CODESPACECTL_GH_BIN", "/bin/true");
 
-        let r = resolve_gh_bin(None).await.expect("env var should win when path exists");
+        let r = resolve_gh_bin(None)
+            .await
+            .expect("env var should win when path exists");
         assert_eq!(r, "/bin/true");
 
         match prev {

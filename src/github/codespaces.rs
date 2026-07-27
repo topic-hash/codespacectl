@@ -120,10 +120,7 @@ impl GitHubClient {
     /// Get info about a specific codespace by name.
     pub async fn get_codespace(&self, name: &str) -> Result<CodespaceInfo> {
         let resp = self
-            .request(
-                reqwest::Method::GET,
-                &format!("/user/codespaces/{}", name),
-            )
+            .request(reqwest::Method::GET, &format!("/user/codespaces/{}", name))
             .send()
             .await?;
         let resp = self.map_error(resp).await?;
@@ -197,10 +194,12 @@ impl GitHubClient {
             CodespaceState::Available => Ok(info),
             CodespaceState::Shutdown | CodespaceState::ShuttingDown => {
                 self.start_codespace(name).await?;
-                self.wait_for_state(name, CodespaceState::Available, timeout_secs).await
+                self.wait_for_state(name, CodespaceState::Available, timeout_secs)
+                    .await
             }
             CodespaceState::Starting | CodespaceState::Provisioning | CodespaceState::Queued => {
-                self.wait_for_state(name, CodespaceState::Available, timeout_secs).await
+                self.wait_for_state(name, CodespaceState::Available, timeout_secs)
+                    .await
             }
             other => Err(CodespaceError::CodespaceUnreachable(format!(
                 "codespace {} is in state {} — cannot ensure running",
@@ -224,20 +223,44 @@ mod tests {
         assert_eq!(CodespaceState::from_str("Unknown"), CodespaceState::Unknown);
         assert_eq!(CodespaceState::from_str("Created"), CodespaceState::Created);
         assert_eq!(CodespaceState::from_str("Queued"), CodespaceState::Queued);
-        assert_eq!(CodespaceState::from_str("Provisioning"), CodespaceState::Provisioning);
-        assert_eq!(CodespaceState::from_str("Available"), CodespaceState::Available);
-        assert_eq!(CodespaceState::from_str("Starting"), CodespaceState::Starting);
-        assert_eq!(CodespaceState::from_str("ShuttingDown"), CodespaceState::ShuttingDown);
-        assert_eq!(CodespaceState::from_str("Shutdown"), CodespaceState::Shutdown);
+        assert_eq!(
+            CodespaceState::from_str("Provisioning"),
+            CodespaceState::Provisioning
+        );
+        assert_eq!(
+            CodespaceState::from_str("Available"),
+            CodespaceState::Available
+        );
+        assert_eq!(
+            CodespaceState::from_str("Starting"),
+            CodespaceState::Starting
+        );
+        assert_eq!(
+            CodespaceState::from_str("ShuttingDown"),
+            CodespaceState::ShuttingDown
+        );
+        assert_eq!(
+            CodespaceState::from_str("Shutdown"),
+            CodespaceState::Shutdown
+        );
         assert_eq!(CodespaceState::from_str("Failed"), CodespaceState::Failed);
-        assert_eq!(CodespaceState::from_str("Exporting"), CodespaceState::Exporting);
-        assert_eq!(CodespaceState::from_str("Updating"), CodespaceState::Updating);
+        assert_eq!(
+            CodespaceState::from_str("Exporting"),
+            CodespaceState::Exporting
+        );
+        assert_eq!(
+            CodespaceState::from_str("Updating"),
+            CodespaceState::Updating
+        );
         assert_eq!(CodespaceState::from_str("Deleted"), CodespaceState::Deleted);
     }
 
     #[test]
     fn test_state_from_str_unknown_string_returns_unknown() {
-        assert_eq!(CodespaceState::from_str("NotARealState"), CodespaceState::Unknown);
+        assert_eq!(
+            CodespaceState::from_str("NotARealState"),
+            CodespaceState::Unknown
+        );
     }
 
     #[test]
@@ -467,7 +490,10 @@ mod tests {
             .await;
 
         let client = make_client(server.url()).await;
-        let info = client.get_codespace("my-cs").await.expect("get should succeed");
+        let info = client
+            .get_codespace("my-cs")
+            .await
+            .expect("get should succeed");
         assert_eq!(info.name, "my-cs");
         assert_eq!(info.state, CodespaceState::Available);
         assert_eq!(info.repository.full_name, "owner/repo");
@@ -506,7 +532,10 @@ mod tests {
             .await;
 
         let client = make_client(server.url()).await;
-        client.start_codespace("cs").await.expect("start should succeed on 200");
+        client
+            .start_codespace("cs")
+            .await
+            .expect("start should succeed on 200");
         m.assert_async().await;
     }
 
@@ -521,7 +550,10 @@ mod tests {
             .await;
 
         let client = make_client(server.url()).await;
-        client.start_codespace("cs").await.expect("start should succeed on 202");
+        client
+            .start_codespace("cs")
+            .await
+            .expect("start should succeed on 202");
         m.assert_async().await;
     }
 
@@ -557,7 +589,10 @@ mod tests {
             .await;
 
         let client = make_client(server.url()).await;
-        client.stop_codespace("cs").await.expect("stop should succeed on 200");
+        client
+            .stop_codespace("cs")
+            .await
+            .expect("stop should succeed on 200");
         m.assert_async().await;
     }
 
@@ -572,7 +607,10 @@ mod tests {
             .await;
 
         let client = make_client(server.url()).await;
-        client.stop_codespace("cs").await.expect("stop should succeed on 202");
+        client
+            .stop_codespace("cs")
+            .await
+            .expect("stop should succeed on 202");
         m.assert_async().await;
     }
 

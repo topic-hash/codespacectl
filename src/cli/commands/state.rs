@@ -4,7 +4,7 @@
 //! `--export`: dumps the state file as pretty-printed JSON.
 //! `--import <path>`: replaces the state file with the JSON at `<path>`.
 
-use crate::cli::{Cli, OutputEnvelope, print_envelope};
+use crate::cli::{print_envelope, Cli, OutputEnvelope};
 use crate::state::{export_state, import_state, load_state, state_file_path};
 use crate::CodespaceError;
 

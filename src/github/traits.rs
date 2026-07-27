@@ -230,13 +230,15 @@ pub mod test_support {
                     )
                     .await
                 }
-                _ => GithubApiClient::wait_for_state(
-                    self,
-                    name,
-                    CodespaceState::Available,
-                    timeout_secs,
-                )
-                .await,
+                _ => {
+                    GithubApiClient::wait_for_state(
+                        self,
+                        name,
+                        CodespaceState::Available,
+                        timeout_secs,
+                    )
+                    .await
+                }
             }
         }
     }
@@ -282,8 +284,8 @@ mod tests {
     //! dependencies). Wave 1 only verifies the fakes themselves behave
     //! correctly — no use-case logic is exercised here.
 
-    use super::*;
     use super::test_support::*;
+    use super::*;
     use crate::CodespaceError;
 
     #[tokio::test]
@@ -308,7 +310,10 @@ mod tests {
         fake.start_codespace("alpha")
             .await
             .expect("start should succeed");
-        let info = fake.get_codespace("alpha").await.expect("get should succeed");
+        let info = fake
+            .get_codespace("alpha")
+            .await
+            .expect("get should succeed");
         assert_eq!(info.state, CodespaceState::Available);
     }
 
@@ -319,7 +324,10 @@ mod tests {
         fake.stop_codespace("alpha")
             .await
             .expect("stop should succeed");
-        let info = fake.get_codespace("alpha").await.expect("get should succeed");
+        let info = fake
+            .get_codespace("alpha")
+            .await
+            .expect("get should succeed");
         assert_eq!(info.state, CodespaceState::Shutdown);
     }
 
@@ -349,11 +357,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_make_info_with_repo_sets_full_name_and_short_name() {
-        let info = make_info_with_repo(
-            "alpha",
-            CodespaceState::Available,
-            "topic-hash/DataMigrata",
-        );
+        let info =
+            make_info_with_repo("alpha", CodespaceState::Available, "topic-hash/DataMigrata");
         assert_eq!(info.repository.full_name, "topic-hash/DataMigrata");
         assert_eq!(info.repository.name, "DataMigrata");
     }

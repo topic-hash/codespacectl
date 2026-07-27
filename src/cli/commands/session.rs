@@ -4,8 +4,8 @@
 //! `--session <id>`: dumps every entry in that session's NDJSON log as either
 //! formatted text (default) or as a JSON array (under `--json`).
 
-use crate::cli::{Cli, OutputEnvelope, print_envelope};
 use crate::cli::args::SessionCommands;
+use crate::cli::{print_envelope, Cli, OutputEnvelope};
 use crate::session::SessionLog;
 
 /// Handle the `session` subcommand (currently only `session log`).

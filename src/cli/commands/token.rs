@@ -6,8 +6,8 @@
 //! - `get`: prints the token file path (NEVER the token itself).
 //! - `clear`: deletes the token file (no-op if absent).
 
-use crate::cli::{Cli, OutputEnvelope, print_envelope};
 use crate::cli::args::TokenCommands;
+use crate::cli::{print_envelope, Cli, OutputEnvelope};
 use crate::github::auth::{clear_token, save_token, token_file_path};
 use crate::CodespaceError;
 use std::io::Read;

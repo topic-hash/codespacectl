@@ -4,7 +4,7 @@
 //! needed, no template substitution). The command's exit code is propagated
 //! as the process exit code.
 
-use crate::cli::{Cli, OutputEnvelope, SessionRef, print_envelope};
+use crate::cli::{print_envelope, Cli, OutputEnvelope, SessionRef};
 use crate::exec::exec_raw;
 use crate::session::SessionLog;
 use crate::ssh::CodespaceSsh;

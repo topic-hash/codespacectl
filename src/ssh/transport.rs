@@ -162,18 +162,12 @@ impl AsyncWrite for SshTransport {
         Pin::new(&mut this.stdin).poll_write(cx, buf)
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let this = self.get_mut();
         Pin::new(&mut this.stdin).poll_flush(cx)
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<std::io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         let this = self.get_mut();
         Pin::new(&mut this.stdin).poll_shutdown(cx)
     }
@@ -264,7 +258,9 @@ impl CodespaceSsh {
     ///   e.g. /path/to/tools/bin/gh  ->  /path/to/tools/bin/fake-ssh/
     fn fake_ssh_dir(gh_bin: &str) -> std::path::PathBuf {
         let gh_path = std::path::Path::new(gh_bin);
-        let parent = gh_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let parent = gh_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
         parent.join("fake-ssh")
     }
 
@@ -272,11 +268,7 @@ impl CodespaceSsh {
     ///
     /// `gh_bin` is the path to the gh CLI binary (typically vendored at
     /// `tools/bin/gh`). `timeout` bounds the whole connect + auth attempt.
-    pub async fn connect(
-        codespace_name: &str,
-        gh_bin: &str,
-        timeout: Duration,
-    ) -> Result<Self> {
+    pub async fn connect(codespace_name: &str, gh_bin: &str, timeout: Duration) -> Result<Self> {
         let connect_timeout = if timeout.is_zero() {
             Duration::from_secs(DEFAULT_CONNECT_TIMEOUT_SECS)
         } else {
@@ -395,10 +387,7 @@ impl CodespaceSsh {
         .map_err(|e| SshError::AuthFailed(e.to_string()))?;
 
         if !auth_ok {
-            return Err(SshError::AuthFailed(
-                "server rejected publickey auth".into(),
-            )
-            .into());
+            return Err(SshError::AuthFailed("server rejected publickey auth".into()).into());
         }
 
         // 5. Read the captured host key fingerprint (if check_server_key fired).
@@ -486,10 +475,7 @@ impl CodespaceSsh {
 
         if !got_exit {
             // Server closed the channel without sending ExitStatus — treat as failure.
-            return Err(SshError::ExecFailed(
-                "channel closed without exit status".into(),
-            )
-            .into());
+            return Err(SshError::ExecFailed("channel closed without exit status".into()).into());
         }
 
         Ok(ExecResult {
@@ -552,7 +538,9 @@ pub fn ensure_ssh_key() -> Result<russh_keys::key::KeyPair> {
 
 /// Load a KeyPair from a PEM file on disk (OpenSSH or PKCS#8 format).
 pub fn load_ssh_key(path: &Path) -> Result<russh_keys::key::KeyPair> {
-    russh_keys::load_secret_key(path, None).map_err(SshError::from).map_err(Into::into)
+    russh_keys::load_secret_key(path, None)
+        .map_err(SshError::from)
+        .map_err(Into::into)
 }
 
 /// Generate a fresh Ed25519 KeyPair, serialize as PKCS#8 PEM to `path`,
@@ -574,19 +562,21 @@ pub fn generate_and_store_ssh_key(path: &Path) -> Result<russh_keys::key::KeyPai
     // `-----BEGIN PRIVATE KEY-----` block that decode_secret_key (used by
     // load_secret_key) can parse.
     let mut file = std::fs::File::create(path).map_err(|e| {
-        SshError::KeyGenFailed(format!("failed to create key file {}: {}", path.display(), e))
+        SshError::KeyGenFailed(format!(
+            "failed to create key file {}: {}",
+            path.display(),
+            e
+        ))
     })?;
 
-    russh_keys::encode_pkcs8_pem(&key_pair, &mut file).map_err(|e| {
-        SshError::KeyGenFailed(format!("failed to encode key pair: {}", e))
-    })?;
+    russh_keys::encode_pkcs8_pem(&key_pair, &mut file)
+        .map_err(|e| SshError::KeyGenFailed(format!("failed to encode key pair: {}", e)))?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
-            SshError::KeyGenFailed(format!("failed to set key file perms: {}", e))
-        })?;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| SshError::KeyGenFailed(format!("failed to set key file perms: {}", e)))?;
     }
 
     Ok(key_pair)
@@ -859,4 +849,3 @@ mod tests {
         assert_eq!(*guard, Some("SHA256:test_value".to_string()));
     }
 }
-

@@ -3,12 +3,12 @@
 //! Tracks: current codespace, current manifest, manifest SHA, per-codespace
 //! SSH host keys, last-known states, last health check status, token fingerprint.
 
-pub mod file;
 pub mod codespace;
+pub mod file;
 pub mod manifest_state;
 
-pub use file::{load_state, save_state, state_dir, state_file_path, export_state, import_state};
 pub use codespace::CodespaceState;
+pub use file::{export_state, import_state, load_state, save_state, state_dir, state_file_path};
 pub use manifest_state::ManifestState;
 
 use serde::{Deserialize, Serialize};

@@ -4,7 +4,7 @@
 //! `--force`), opens an SSH session, executes the command, and propagates the
 //! command's remote exit code as the process exit code.
 
-use crate::cli::{Cli, OutputEnvelope, SessionRef, print_envelope};
+use crate::cli::{print_envelope, Cli, OutputEnvelope, SessionRef};
 use crate::exec::exec_command;
 use crate::health::{run_all_checks, HealthStatus};
 use crate::session::SessionLog;

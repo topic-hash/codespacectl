@@ -13,8 +13,8 @@ use common::cargo_bin;
 /// All 12 subcommands that should be listed in the top-level help. Used to
 /// verify the help output mentions each one.
 const ALL_SUBCOMMANDS: &[&str] = &[
-    "init", "discover", "switch", "connect", "health", "exec", "raw", "stop",
-    "state", "session", "doctor", "token",
+    "init", "discover", "switch", "connect", "health", "exec", "raw", "stop", "state", "session",
+    "doctor", "token",
 ];
 
 /// `codespacectl --help` exits 0 and prints a banner containing "codespacectl".
@@ -50,21 +50,11 @@ fn test_help_lists_all_subcommands() {
 fn test_help_short_matches_long() {
     let mut long_cmd = cargo_bin();
     long_cmd.arg("--help");
-    let long_output = long_cmd
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
+    let long_output = long_cmd.assert().success().get_output().stdout.clone();
 
     let mut short_cmd = cargo_bin();
     short_cmd.arg("-h");
-    let short_output = short_cmd
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
+    let short_output = short_cmd.assert().success().get_output().stdout.clone();
 
     let long = String::from_utf8(long_output).expect("long help utf8");
     let short = String::from_utf8(short_output).expect("short help utf8");

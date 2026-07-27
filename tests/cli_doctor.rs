@@ -60,8 +60,7 @@ fn test_json_doctor_envelope_ok() {
 fn test_doctor_output_mentions_python3() {
     let mut cmd = cargo_bin();
     cmd.arg("doctor");
-    cmd.assert()
-        .stdout(predicate::str::contains("python3"));
+    cmd.assert().stdout(predicate::str::contains("python3"));
 }
 
 /// `codespacectl doctor` output mentions the `token` check.
@@ -78,8 +77,7 @@ fn test_doctor_output_mentions_token() {
 fn test_doctor_output_mentions_state_file() {
     let mut cmd = cargo_bin();
     cmd.arg("doctor");
-    cmd.assert()
-        .stdout(predicate::str::contains("state_file"));
+    cmd.assert().stdout(predicate::str::contains("state_file"));
 }
 
 /// `codespacectl doctor` output mentions the `gh_binary` check.
@@ -87,8 +85,7 @@ fn test_doctor_output_mentions_state_file() {
 fn test_doctor_output_mentions_gh_binary() {
     let mut cmd = cargo_bin();
     cmd.arg("doctor");
-    cmd.assert()
-        .stdout(predicate::str::contains("gh_binary"));
+    cmd.assert().stdout(predicate::str::contains("gh_binary"));
 }
 
 /// `codespacectl doctor` output mentions the `network` check.
@@ -96,8 +93,7 @@ fn test_doctor_output_mentions_gh_binary() {
 fn test_doctor_output_mentions_network() {
     let mut cmd = cargo_bin();
     cmd.arg("doctor");
-    cmd.assert()
-        .stdout(predicate::str::contains("network"));
+    cmd.assert().stdout(predicate::str::contains("network"));
 }
 
 /// `codespacectl --json doctor` envelope's `result.checks` array contains
@@ -114,7 +110,12 @@ fn test_json_doctor_result_contains_all_checks() {
         .expect("result.checks should be an array");
     let names: Vec<String> = checks
         .iter()
-        .map(|c| c["name"].as_str().expect("check.name is string").to_string())
+        .map(|c| {
+            c["name"]
+                .as_str()
+                .expect("check.name is string")
+                .to_string()
+        })
         .collect();
     for expected in [
         "python3",

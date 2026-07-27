@@ -1,8 +1,8 @@
 //! Manifest schema — Serde structs matching `CODESPACE.yaml` structure.
 //! See `docs/MANIFEST_SPEC.md` for the authoritative spec.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Top-level manifest structure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,7 +177,10 @@ hooks:
         let secret = &m.environment.secrets[0];
         assert_eq!(secret.name, "SA_PASSWORD");
         assert!(secret.required);
-        let gen = secret.generate_if_missing.as_ref().expect("generate_if_missing");
+        let gen = secret
+            .generate_if_missing
+            .as_ref()
+            .expect("generate_if_missing");
         assert_eq!(gen.length, 24);
         assert_eq!(gen.charset, "alnum+symbols");
         let migrate = m.commands.get("migrate").expect("migrate command");
@@ -229,7 +232,10 @@ environment:
   workingDir: /x
 "#;
         let m: Manifest = serde_yaml::from_str(yaml).expect("should parse");
-        assert!(m.commands.is_empty(), "commands should default to empty HashMap");
+        assert!(
+            m.commands.is_empty(),
+            "commands should default to empty HashMap"
+        );
     }
 
     #[test]
@@ -242,7 +248,10 @@ environment:
   workingDir: /x
 "#;
         let m: Manifest = serde_yaml::from_str(yaml).expect("should parse");
-        assert!(m.hooks.is_none(), "hooks should default to None when absent");
+        assert!(
+            m.hooks.is_none(),
+            "hooks should default to None when absent"
+        );
     }
 
     #[test]
@@ -254,7 +263,10 @@ environment:
         assert_eq!(back.metadata.name, original.metadata.name);
         assert_eq!(back.metadata.description, original.metadata.description);
         assert_eq!(back.metadata.repo, original.metadata.repo);
-        assert_eq!(back.environment.working_dir, original.environment.working_dir);
+        assert_eq!(
+            back.environment.working_dir,
+            original.environment.working_dir
+        );
         assert_eq!(
             back.environment.health_checks.len(),
             original.environment.health_checks.len()
@@ -274,7 +286,10 @@ environment:
         let back: Manifest = serde_yaml::from_str(&yaml).expect("deserialize from YAML");
         assert_eq!(back.api_version, original.api_version);
         assert_eq!(back.metadata.name, original.metadata.name);
-        assert_eq!(back.environment.working_dir, original.environment.working_dir);
+        assert_eq!(
+            back.environment.working_dir,
+            original.environment.working_dir
+        );
     }
 
     #[test]

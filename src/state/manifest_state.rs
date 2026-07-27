@@ -105,7 +105,10 @@ mod tests {
         let json = r#"{"last_validated_at": "2024-01-01T00:00:00Z"}"#;
         let ms: ManifestState = serde_json::from_str(json).expect("deserialize");
         assert!(ms.sha256.is_none());
-        assert_eq!(ms.last_validated_at.as_deref(), Some("2024-01-01T00:00:00Z"));
+        assert_eq!(
+            ms.last_validated_at.as_deref(),
+            Some("2024-01-01T00:00:00Z")
+        );
     }
 
     #[test]

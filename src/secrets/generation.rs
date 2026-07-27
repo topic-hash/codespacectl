@@ -293,10 +293,9 @@ mod tests {
 
     #[test]
     fn test_generate_secret_base64_charset_has_64_symbols() {
-        let b64: Vec<char> =
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-                .chars()
-                .collect();
+        let b64: Vec<char> = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+            .chars()
+            .collect();
         assert_eq!(b64.len(), 64);
     }
 

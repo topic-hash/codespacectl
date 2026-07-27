@@ -2,8 +2,8 @@
 //!
 //! Wave 4 subagent (parallel): implement.
 
-pub mod storage;
 pub mod generation;
+pub mod storage;
 
-pub use storage::{SecretStore, SecretError};
 pub use generation::generate_secret;
+pub use storage::{SecretError, SecretStore};

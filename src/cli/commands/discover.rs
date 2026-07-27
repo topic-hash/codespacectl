@@ -5,7 +5,7 @@
 //! array schema suitable for programmatic selection (use with `switch`).
 
 use crate::cli::args::*;
-use crate::cli::{OutputEnvelope, print_envelope};
+use crate::cli::{print_envelope, OutputEnvelope};
 use crate::github::traits::GithubApiClient;
 use crate::state;
 use crate::Result;
@@ -149,7 +149,9 @@ mod tests {
     //!      on stdout or the GitHub API.
     use super::*;
     use crate::github::codespaces::CodespaceState;
-    use crate::github::traits::test_support::{make_info, make_info_with_repo, FakeGithubApiClient};
+    use crate::github::traits::test_support::{
+        make_info, make_info_with_repo, FakeGithubApiClient,
+    };
 
     /// Construct a `Cli` for the `Discover` subcommand. `json` toggles the
     /// output mode so we can exercise both branches of `print_entries`.
@@ -177,22 +179,9 @@ mod tests {
     /// unique to one — expect exactly one entry, the matching one.
     #[test]
     fn test_build_entries_repo_filter_matches_substring() {
-        let cs1 = make_info_with_repo(
-            "alpha",
-            CodespaceState::Available,
-            "topic-hash/RepoA",
-        );
-        let cs2 = make_info_with_repo(
-            "beta",
-            CodespaceState::Available,
-            "topic-hash/RepoB",
-        );
-        let entries = build_entries(
-            vec![cs1, cs2],
-            &Some("RepoA".to_string()),
-            &None,
-            None,
-        );
+        let cs1 = make_info_with_repo("alpha", CodespaceState::Available, "topic-hash/RepoA");
+        let cs2 = make_info_with_repo("beta", CodespaceState::Available, "topic-hash/RepoB");
+        let entries = build_entries(vec![cs1, cs2], &Some("RepoA".to_string()), &None, None);
         assert_eq!(entries.len(), 1, "repo filter should match exactly 1 entry");
         assert_eq!(entries[0].name, "alpha");
         assert_eq!(entries[0].repository, "topic-hash/RepoA");
@@ -204,13 +193,12 @@ mod tests {
     fn test_build_entries_state_filter_keeps_only_matching_state() {
         let cs1 = make_info("alpha", CodespaceState::Available);
         let cs2 = make_info("beta", CodespaceState::Shutdown);
-        let entries = build_entries(
-            vec![cs1, cs2],
-            &None,
-            &Some("Available".to_string()),
-            None,
+        let entries = build_entries(vec![cs1, cs2], &None, &Some("Available".to_string()), None);
+        assert_eq!(
+            entries.len(),
+            1,
+            "state filter should match exactly 1 entry"
         );
-        assert_eq!(entries.len(), 1, "state filter should match exactly 1 entry");
         assert_eq!(entries[0].name, "alpha");
         assert_eq!(entries[0].state, "Available");
     }

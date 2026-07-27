@@ -175,7 +175,11 @@ mod tests {
             let log = SessionLog::new("my-cs", "my-app").expect("create");
             let entries = SessionLog::read(&log.id).expect("read");
             assert!(!entries.is_empty(), "should have at least one entry");
-            assert_eq!(entries.len(), 1, "should have exactly one entry on creation");
+            assert_eq!(
+                entries.len(),
+                1,
+                "should have exactly one entry on creation"
+            );
             let first = &entries[0];
             assert!(matches!(first.kind, SessionEntryKind::Connect));
             assert_eq!(first.data["codespace"], "my-cs");
@@ -214,11 +218,8 @@ mod tests {
             let log = SessionLog::new("cs", "app").expect("create");
             // Append many entries.
             for i in 0..5 {
-                log.append(
-                    SessionEntryKind::ExecStart,
-                    serde_json::json!({"i": i}),
-                )
-                .expect("append");
+                log.append(SessionEntryKind::ExecStart, serde_json::json!({"i": i}))
+                    .expect("append");
             }
             let entries = SessionLog::read(&log.id).expect("read");
             assert_eq!(entries.len(), 6, "1 Connect + 5 appends");
@@ -233,8 +234,11 @@ mod tests {
     fn test_session_log_read_returns_entries_for_session() {
         with_temp_xdg(|| {
             let log = SessionLog::new("cs1", "app1").expect("create");
-            log.append(SessionEntryKind::Stop, serde_json::json!({"reason": "done"}))
-                .expect("append");
+            log.append(
+                SessionEntryKind::Stop,
+                serde_json::json!({"reason": "done"}),
+            )
+            .expect("append");
             let entries = SessionLog::read(&log.id).expect("read");
             assert_eq!(entries.len(), 2);
             assert!(matches!(entries[1].kind, SessionEntryKind::Stop));
@@ -321,9 +325,19 @@ mod tests {
             let log = SessionLog::new("cs", "app").expect("create");
             let id = log.id();
             // UUID v4 string is 36 chars: 8-4-4-4-12 hex digits with hyphens.
-            assert_eq!(id.len(), 36, "UUID should be 36 chars, got: {} ({})", id.len(), id);
+            assert_eq!(
+                id.len(),
+                36,
+                "UUID should be 36 chars, got: {} ({})",
+                id.len(),
+                id
+            );
             let parts: Vec<&str> = id.split('-').collect();
-            assert_eq!(parts.len(), 5, "UUID should have 5 parts separated by hyphens");
+            assert_eq!(
+                parts.len(),
+                5,
+                "UUID should have 5 parts separated by hyphens"
+            );
             assert_eq!(parts[0].len(), 8);
             assert_eq!(parts[1].len(), 4);
             assert_eq!(parts[2].len(), 4);
@@ -455,7 +469,10 @@ mod tests {
             let id = uuid::Uuid::new_v4().to_string();
             let path = sessions_dir().join(format!("{}.ndjson", id));
             std::fs::create_dir_all(sessions_dir()).expect("create sessions dir");
-            let log = SessionLog { id: id.clone(), path: path.clone() };
+            let log = SessionLog {
+                id: id.clone(),
+                path: path.clone(),
+            };
             assert!(!path.exists());
             log.append(SessionEntryKind::Stop, serde_json::json!({"x": 1}))
                 .expect("append should create file");
@@ -547,13 +564,20 @@ mod tests {
             let entries = SessionLog::read(&log.id).expect("read");
             let ts = &entries[0].timestamp;
             // RFC3339 timestamps contain 'T' (date-time separator) and 'Z' (UTC).
-            assert!(ts.contains('T'), "timestamp should be RFC3339 with T, got: {}", ts);
-            assert!(ts.ends_with('Z') || ts.contains('+'), "timestamp should end with Z or +offset, got: {}", ts);
+            assert!(
+                ts.contains('T'),
+                "timestamp should be RFC3339 with T, got: {}",
+                ts
+            );
+            assert!(
+                ts.ends_with('Z') || ts.contains('+'),
+                "timestamp should end with Z or +offset, got: {}",
+                ts
+            );
             // Should be parseable as a chrono DateTime.
-            let _dt: chrono::DateTime<chrono::Utc> =
-                chrono::DateTime::parse_from_rfc3339(ts)
-                    .expect("timestamp should parse as RFC3339")
-                    .with_timezone(&chrono::Utc);
+            let _dt: chrono::DateTime<chrono::Utc> = chrono::DateTime::parse_from_rfc3339(ts)
+                .expect("timestamp should parse as RFC3339")
+                .with_timezone(&chrono::Utc);
         });
     }
 }

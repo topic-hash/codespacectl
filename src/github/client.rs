@@ -1,9 +1,9 @@
 //! HTTP client for GitHub API.
 
-use crate::{CodespaceError, Result};
-use reqwest::{Client, StatusCode};
 use crate::github::codespaces::{CodespaceInfo, CodespaceState};
 use crate::github::traits::GithubApiClient;
+use crate::{CodespaceError, Result};
+use reqwest::{Client, StatusCode};
 
 const API_BASE: &str = "https://api.github.com";
 
@@ -83,9 +83,10 @@ impl GitHubClient {
             StatusCode::TOO_MANY_REQUESTS => {
                 Err(CodespaceError::CodespaceUnreachable("rate limited".into()))
             }
-            s if s.is_server_error() => {
-                Err(CodespaceError::CodespaceUnreachable(format!("{}: {}", s, body)))
-            }
+            s if s.is_server_error() => Err(CodespaceError::CodespaceUnreachable(format!(
+                "{}: {}",
+                s, body
+            ))),
             s => Err(CodespaceError::Internal(format!("HTTP {}: {}", s, body))),
         }
     }
@@ -239,7 +240,9 @@ mod tests {
             .create_async()
             .await;
 
-        let client = GitHubClient::new_with_base_url("ghp_t".into(), "https://wrong.invalid".into()).unwrap();
+        let client =
+            GitHubClient::new_with_base_url("ghp_t".into(), "https://wrong.invalid".into())
+                .unwrap();
         let resp = client
             .request(reqwest::Method::GET, &abs_url)
             .send()
@@ -253,10 +256,21 @@ mod tests {
     async fn test_request_does_not_prefix_https_urls() {
         let (mut server, base) = make_server().await;
         let abs_url = format!("{}/user", base);
-        let m = server.mock("GET", "/user").with_status(200).with_body("{}").create_async().await;
+        let m = server
+            .mock("GET", "/user")
+            .with_status(200)
+            .with_body("{}")
+            .create_async()
+            .await;
 
-        let client = GitHubClient::new_with_base_url("ghp_t".into(), "https://wrong.invalid".into()).unwrap();
-        let resp = client.request(reqwest::Method::GET, &abs_url).send().await.expect("send");
+        let client =
+            GitHubClient::new_with_base_url("ghp_t".into(), "https://wrong.invalid".into())
+                .unwrap();
+        let resp = client
+            .request(reqwest::Method::GET, &abs_url)
+            .send()
+            .await
+            .expect("send");
         assert_eq!(resp.status(), 200);
         m.assert_async().await;
     }
@@ -273,7 +287,11 @@ mod tests {
             .await;
 
         let client = GitHubClient::new_with_base_url("ghp_secret_token".into(), base).unwrap();
-        let resp = client.request(reqwest::Method::GET, "/user").send().await.expect("send");
+        let resp = client
+            .request(reqwest::Method::GET, "/user")
+            .send()
+            .await
+            .expect("send");
         assert_eq!(resp.status(), 200);
         m.assert_async().await;
     }
@@ -290,7 +308,11 @@ mod tests {
             .await;
 
         let client = GitHubClient::new_with_base_url("ghp_t".into(), base).unwrap();
-        let resp = client.request(reqwest::Method::GET, "/user").send().await.expect("send");
+        let resp = client
+            .request(reqwest::Method::GET, "/user")
+            .send()
+            .await
+            .expect("send");
         assert_eq!(resp.status(), 200);
         m.assert_async().await;
     }
@@ -307,7 +329,11 @@ mod tests {
             .await;
 
         let client = GitHubClient::new_with_base_url("ghp_t".into(), base).unwrap();
-        let resp = client.request(reqwest::Method::GET, "/user").send().await.expect("send");
+        let resp = client
+            .request(reqwest::Method::GET, "/user")
+            .send()
+            .await
+            .expect("send");
         assert_eq!(resp.status(), 200);
         m.assert_async().await;
     }
@@ -317,14 +343,21 @@ mod tests {
         let (mut server, base) = make_server().await;
         let m = server
             .mock("GET", "/user")
-            .match_header("user-agent", "codespacectl/0.1 (https://github.com/topic-hash/codespacectl)")
+            .match_header(
+                "user-agent",
+                "codespacectl/0.1 (https://github.com/topic-hash/codespacectl)",
+            )
             .with_status(200)
             .with_body("{}")
             .create_async()
             .await;
 
         let client = GitHubClient::new_with_base_url("ghp_t".into(), base).unwrap();
-        let resp = client.request(reqwest::Method::GET, "/user").send().await.expect("send");
+        let resp = client
+            .request(reqwest::Method::GET, "/user")
+            .send()
+            .await
+            .expect("send");
         assert_eq!(resp.status(), 200);
         m.assert_async().await;
     }

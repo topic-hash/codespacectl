@@ -27,9 +27,8 @@ pub fn resolve_token() -> Result<String> {
     let token_path = token_file_path();
     if token_path.exists() {
         check_token_file_perms(&token_path)?;
-        let content = std::fs::read_to_string(&token_path).map_err(|e| {
-            CodespaceError::Internal(format!("failed to read token file: {}", e))
-        })?;
+        let content = std::fs::read_to_string(&token_path)
+            .map_err(|e| CodespaceError::Internal(format!("failed to read token file: {}", e)))?;
         let token = content.trim().to_string();
         if !token.is_empty() {
             return Ok(token);
@@ -51,18 +50,17 @@ pub fn token_file_path() -> std::path::PathBuf {
 pub fn save_token(token: &str) -> Result<()> {
     let path = token_file_path();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            CodespaceError::Internal(format!("failed to create token dir: {}", e))
-        })?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| CodespaceError::Internal(format!("failed to create token dir: {}", e)))?;
     }
-    std::fs::write(&path, token).map_err(|e| {
-        CodespaceError::Internal(format!("failed to write token file: {}", e))
-    })?;
+    std::fs::write(&path, token)
+        .map_err(|e| CodespaceError::Internal(format!("failed to write token file: {}", e)))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| CodespaceError::Internal(format!("failed to set token file perms: {}", e)))?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
+            CodespaceError::Internal(format!("failed to set token file perms: {}", e))
+        })?;
     }
     Ok(())
 }
@@ -71,9 +69,8 @@ pub fn save_token(token: &str) -> Result<()> {
 pub fn clear_token() -> Result<()> {
     let path = token_file_path();
     if path.exists() {
-        std::fs::remove_file(&path).map_err(|e| {
-            CodespaceError::Internal(format!("failed to remove token file: {}", e))
-        })?;
+        std::fs::remove_file(&path)
+            .map_err(|e| CodespaceError::Internal(format!("failed to remove token file: {}", e)))?;
     }
     Ok(())
 }
@@ -88,7 +85,8 @@ fn check_token_file_perms(path: &std::path::Path) -> Result<()> {
     if mode & 0o077 != 0 {
         return Err(CodespaceError::AuthFailed(format!(
             "token file {} has permissions {:o}, expected 0600 — refusing to use",
-            path.display(), mode
+            path.display(),
+            mode
         )));
     }
     Ok(())
@@ -103,10 +101,7 @@ impl GitHubClient {
     /// Validate the token by calling `/user` and checking scopes.
     /// Returns the username if valid.
     pub async fn validate_token(&self) -> Result<String> {
-        let resp = self
-            .request(reqwest::Method::GET, "/user")
-            .send()
-            .await?;
+        let resp = self.request(reqwest::Method::GET, "/user").send().await?;
         let resp = self.map_error(resp).await?;
         let parsed: serde_json::Value = resp.json().await?;
         let login = parsed
@@ -389,10 +384,16 @@ mod tests {
         let _cfg = ConfigDirGuard::new(tmp.path());
 
         save_token("ghp_to_be_cleared").expect("save_token should succeed");
-        assert!(token_file_path().exists(), "token file should exist before clear");
+        assert!(
+            token_file_path().exists(),
+            "token file should exist before clear"
+        );
 
         clear_token().expect("clear_token should succeed");
-        assert!(!token_file_path().exists(), "token file should not exist after clear");
+        assert!(
+            !token_file_path().exists(),
+            "token file should not exist after clear"
+        );
     }
 
     #[test]
@@ -401,7 +402,10 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let _cfg = ConfigDirGuard::new(tmp.path());
 
-        assert!(!token_file_path().exists(), "precondition: token file should not exist");
+        assert!(
+            !token_file_path().exists(),
+            "precondition: token file should not exist"
+        );
         // clear_token should return Ok even though the file doesn't exist.
         clear_token().expect("clear_token on missing file should return Ok");
     }
@@ -423,8 +427,7 @@ mod tests {
         }
         std::fs::write(&path, "ghp_insecure").expect("write");
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
-            .expect("set perms");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("set perms");
 
         let err = resolve_token().unwrap_err();
         assert!(

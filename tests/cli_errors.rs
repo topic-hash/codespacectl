@@ -87,7 +87,10 @@ fn test_json_exec_nonexistent_command_envelope() {
     assert_eq!(json["ok"], false);
     let kind = json["error"]["kind"].as_str().expect("kind is string");
     assert!(
-        matches!(kind, "internal_error" | "token_missing" | "manifest_not_found"),
+        matches!(
+            kind,
+            "internal_error" | "token_missing" | "manifest_not_found"
+        ),
         "expected a plausible early-exit error kind, got {}",
         kind
     );
@@ -144,7 +147,10 @@ fn test_raw_without_token_exits_65_with_codespace_arg() {
         .env_remove("CODESPACECTL_TOKEN");
     let assert = cmd.assert().failure();
     let code = assert.get_output().status.code().expect("exit code");
-    assert_eq!(code, 65, "raw without token (with --codespace) should exit 65");
+    assert_eq!(
+        code, 65,
+        "raw without token (with --codespace) should exit 65"
+    );
 }
 
 /// `codespacectl raw "echo hi"` with no `--codespace` and no token exits
@@ -163,7 +169,10 @@ fn test_raw_without_codespace_or_token_fails() {
     let assert = cmd.assert().failure();
     let code = assert.get_output().status.code().expect("exit code");
     // Expect internal_error (70) — codespace resolution fires first.
-    assert_eq!(code, 70, "raw without --codespace should exit 70 (internal_error)");
+    assert_eq!(
+        code, 70,
+        "raw without --codespace should exit 70 (internal_error)"
+    );
 }
 
 /// `codespacectl --json state --import /nonexistent` returns an error
@@ -173,9 +182,14 @@ fn test_raw_without_codespace_or_token_fails() {
 fn test_json_state_import_nonexistent_envelope_internal_error() {
     let (_tmp, cache_home) = temp_state_dir();
     let mut cmd = cargo_bin();
-    cmd.args(["--json", "state", "--import", "/nonexistent/path/to/import.json"])
-        .env("XDG_CACHE_HOME", &cache_home)
-        .env_remove("CODESPACECTL_TOKEN");
+    cmd.args([
+        "--json",
+        "state",
+        "--import",
+        "/nonexistent/path/to/import.json",
+    ])
+    .env("XDG_CACHE_HOME", &cache_home)
+    .env_remove("CODESPACECTL_TOKEN");
     let output = cmd.assert().failure().get_output().stdout.clone();
     let json: serde_json::Value =
         serde_json::from_slice(&output).expect("valid JSON envelope on error");

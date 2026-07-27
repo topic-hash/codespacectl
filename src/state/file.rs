@@ -22,11 +22,14 @@ pub fn load_state() -> Result<State> {
         return Ok(State::default());
     }
     let content = std::fs::read_to_string(&path).map_err(|e| {
-        CodespaceError::Internal(format!("failed to read state file {}: {}", path.display(), e))
+        CodespaceError::Internal(format!(
+            "failed to read state file {}: {}",
+            path.display(),
+            e
+        ))
     })?;
-    let state: State = serde_json::from_str(&content).map_err(|e| {
-        CodespaceError::Internal(format!("failed to parse state file: {}", e))
-    })?;
+    let state: State = serde_json::from_str(&content)
+        .map_err(|e| CodespaceError::Internal(format!("failed to parse state file: {}", e)))?;
     Ok(state)
 }
 
@@ -34,28 +37,31 @@ pub fn load_state() -> Result<State> {
 pub fn save_state(state: &State) -> Result<()> {
     let dir = state_dir();
     std::fs::create_dir_all(&dir).map_err(|e| {
-        CodespaceError::Internal(format!("failed to create state dir {}: {}", dir.display(), e))
+        CodespaceError::Internal(format!(
+            "failed to create state dir {}: {}",
+            dir.display(),
+            e
+        ))
     })?;
 
     let path = state_file_path();
     let tmp_path = path.with_extension("json.tmp");
 
     let content = serde_json::to_string_pretty(state)?;
-    std::fs::write(&tmp_path, content).map_err(|e| {
-        CodespaceError::Internal(format!("failed to write temp state file: {}", e))
-    })?;
+    std::fs::write(&tmp_path, content)
+        .map_err(|e| CodespaceError::Internal(format!("failed to write temp state file: {}", e)))?;
 
     // Atomic rename
-    std::fs::rename(&tmp_path, &path).map_err(|e| {
-        CodespaceError::Internal(format!("failed to rename state file: {}", e))
-    })?;
+    std::fs::rename(&tmp_path, &path)
+        .map_err(|e| CodespaceError::Internal(format!("failed to rename state file: {}", e)))?;
 
     // Set 0600 perms — only owner can read
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| CodespaceError::Internal(format!("failed to set state file perms: {}", e)))?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
+            CodespaceError::Internal(format!("failed to set state file perms: {}", e))
+        })?;
     }
 
     Ok(())
@@ -69,9 +75,8 @@ pub fn export_state() -> Result<String> {
 
 /// Import state from a JSON string (replaces existing state).
 pub fn import_state(content: &str) -> Result<()> {
-    let state: State = serde_json::from_str(content).map_err(|e| {
-        CodespaceError::Internal(format!("failed to parse imported state: {}", e))
-    })?;
+    let state: State = serde_json::from_str(content)
+        .map_err(|e| CodespaceError::Internal(format!("failed to parse imported state: {}", e)))?;
     save_state(&state)
 }
 
@@ -175,7 +180,10 @@ mod tests {
             let _: serde_json::Value =
                 serde_json::from_str(&content).expect("file should contain valid JSON");
             // Should be pretty-printed (multi-line).
-            assert!(content.contains('\n'), "state file should be pretty-printed");
+            assert!(
+                content.contains('\n'),
+                "state file should be pretty-printed"
+            );
         });
     }
 
@@ -188,7 +196,11 @@ mod tests {
             save_state(&state).expect("save");
             let meta = std::fs::metadata(state_file_path()).expect("metadata");
             let mode = meta.permissions().mode() & 0o777;
-            assert_eq!(mode, 0o600, "state file should have 0600 perms, got {:o}", mode);
+            assert_eq!(
+                mode, 0o600,
+                "state file should have 0600 perms, got {:o}",
+                mode
+            );
         });
     }
 
@@ -233,14 +245,20 @@ mod tests {
 
             assert_eq!(loaded.version, 1);
             assert_eq!(loaded.current_codespace.as_deref(), Some("my-codespace"));
-            assert_eq!(loaded.current_manifest.as_deref(), Some("/path/to/CODESPACE.yaml"));
+            assert_eq!(
+                loaded.current_manifest.as_deref(),
+                Some("/path/to/CODESPACE.yaml")
+            );
             assert_eq!(
                 loaded.current_manifest_sha256.as_deref(),
                 Some("abc123def456abc123def456abc123def456abc123def456abc123def456abcd")
             );
             assert_eq!(loaded.token_fingerprint.as_deref(), Some("deadbeef"));
             assert_eq!(loaded.codespaces.len(), 1);
-            let cs = loaded.codespaces.get("my-codespace").expect("codespace entry");
+            let cs = loaded
+                .codespaces
+                .get("my-codespace")
+                .expect("codespace entry");
             assert_eq!(cs.last_known_state.as_deref(), Some("Available"));
             assert_eq!(cs.host_key_fingerprint.as_deref(), Some("SHA256:xyz"));
             assert_eq!(loaded.manifests.len(), 1);
@@ -410,16 +428,12 @@ mod tests {
             // This is the key correctness property — no torn writes.
             let loaded = load_state().expect("load should succeed after concurrent writes");
             if let Some(cs) = loaded.current_codespace.as_deref() {
-                assert!(
-                    cs.starts_with("cs-"),
-                    "expected cs-N pattern, got: {}",
-                    cs
-                );
+                assert!(cs.starts_with("cs-"), "expected cs-N pattern, got: {}", cs);
             }
             // File should still be valid JSON.
             let content = std::fs::read_to_string(state_file_path()).expect("read file");
-            let _: serde_json::Value =
-                serde_json::from_str(&content).expect("file should be valid JSON after concurrent writes");
+            let _: serde_json::Value = serde_json::from_str(&content)
+                .expect("file should be valid JSON after concurrent writes");
         });
     }
 

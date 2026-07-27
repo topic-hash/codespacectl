@@ -4,7 +4,7 @@
 //! `~/.cache/codespacectl/manifests/<sha256>.yaml`, validating it, and
 //! recording its SHA-256 in the state file.
 
-use crate::cli::{Cli, OutputEnvelope, print_envelope};
+use crate::cli::{print_envelope, Cli, OutputEnvelope};
 use crate::manifest::{manifest_sha256, parse_manifest};
 use crate::state::{load_state, save_state, ManifestState};
 use crate::CodespaceError;

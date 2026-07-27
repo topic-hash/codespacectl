@@ -20,7 +20,8 @@ use common::{cargo_bin, temp_config_dir};
 fn test_token_get_exits_zero() {
     let (_tmp, config_home) = temp_config_dir();
     let mut cmd = cargo_bin();
-    cmd.args(["token", "get"]).env("XDG_CONFIG_HOME", &config_home);
+    cmd.args(["token", "get"])
+        .env("XDG_CONFIG_HOME", &config_home);
     cmd.assert().success();
 }
 
@@ -77,10 +78,10 @@ fn test_token_set_creates_file_with_0600_perms() {
         .write_stdin("ghp_test_token_value_12345\n");
     cmd.assert().success();
 
-    let token_path =
-        std::path::Path::new(&config_home).join("codespacectl").join("token");
-    let metadata = std::fs::metadata(&token_path)
-        .expect("token file should exist after token set");
+    let token_path = std::path::Path::new(&config_home)
+        .join("codespacectl")
+        .join("token");
+    let metadata = std::fs::metadata(&token_path).expect("token file should exist after token set");
 
     #[cfg(unix)]
     {
@@ -131,8 +132,9 @@ fn test_token_set_then_get() {
 #[test]
 fn test_token_clear_removes_file() {
     let (_tmp, config_home) = temp_config_dir();
-    let token_path =
-        std::path::Path::new(&config_home).join("codespacectl").join("token");
+    let token_path = std::path::Path::new(&config_home)
+        .join("codespacectl")
+        .join("token");
 
     // set
     let mut set_cmd = cargo_bin();
@@ -223,12 +225,7 @@ fn test_json_token_clear_envelope_after_set() {
     clear_cmd
         .args(["--json", "token", "clear"])
         .env("XDG_CONFIG_HOME", &config_home);
-    let output = clear_cmd
-        .assert()
-        .success()
-        .get_output()
-        .stdout
-        .clone();
+    let output = clear_cmd.assert().success().get_output().stdout.clone();
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(json["ok"], true);
     assert_eq!(json["result"]["cleared"], true);

@@ -186,8 +186,9 @@ fn load_master_key() -> Result<[u8; 32]> {
 #[cfg(unix)]
 fn set_owner_only_permissions(path: &std::path::Path) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-        .map_err(|e| CodespaceError::Internal(format!("failed to set perms on {}: {}", path.display(), e)))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| {
+        CodespaceError::Internal(format!("failed to set perms on {}: {}", path.display(), e))
+    })?;
     Ok(())
 }
 
@@ -206,7 +207,11 @@ mod tests {
     /// Without this, parallel test runs race on the global env.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-    fn with_temp_dirs() -> (tempfile::TempDir, tempfile::TempDir, std::sync::MutexGuard<'static, ()>) {
+    fn with_temp_dirs() -> (
+        tempfile::TempDir,
+        tempfile::TempDir,
+        std::sync::MutexGuard<'static, ()>,
+    ) {
         let _guard = ENV_LOCK.lock().unwrap();
         let cache = tempfile::tempdir().unwrap();
         let config = tempfile::tempdir().unwrap();
@@ -225,13 +230,19 @@ mod tests {
         let (_cache, _config, _guard) = with_temp_dirs();
         SecretStore::init().unwrap();
         assert!(secrets_dir().exists(), "secrets dir should exist");
-        assert!(identity_path().parent().unwrap().exists(), "config dir should exist");
+        assert!(
+            identity_path().parent().unwrap().exists(),
+            "config dir should exist"
+        );
     }
 
     #[test]
     fn test_secret_store_init_generates_key() {
         let (_cache, _config, _guard) = with_temp_dirs();
-        assert!(!identity_path().exists(), "key should not exist before init");
+        assert!(
+            !identity_path().exists(),
+            "key should not exist before init"
+        );
         SecretStore::init().unwrap();
         assert!(identity_path().exists(), "key should exist after init");
         let key = std::fs::read(identity_path()).unwrap();
@@ -287,8 +298,11 @@ mod tests {
         let (_cache, _config, _guard) = with_temp_dirs();
         SecretStore::init().unwrap();
         let err = SecretStore::get("nonexistent").unwrap_err();
-        assert!(matches!(err, CodespaceError::Internal(ref msg) if msg.contains("secret not found")),
-            "expected NotFound error, got: {:?}", err);
+        assert!(
+            matches!(err, CodespaceError::Internal(ref msg) if msg.contains("secret not found")),
+            "expected NotFound error, got: {:?}",
+            err
+        );
     }
 
     #[test]
@@ -341,8 +355,16 @@ mod tests {
         let (_cache, _config, _guard) = with_temp_dirs();
         SecretStore::init().unwrap();
         use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::metadata(identity_path()).unwrap().permissions().mode();
-        assert_eq!(perms & 0o777, 0o600, "identity file must be 0600, got {:o}", perms);
+        let perms = std::fs::metadata(identity_path())
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(
+            perms & 0o777,
+            0o600,
+            "identity file must be 0600, got {:o}",
+            perms
+        );
     }
 
     #[cfg(unix)]
@@ -351,8 +373,16 @@ mod tests {
         let (_cache, _config, _guard) = with_temp_dirs();
         SecretStore::set("foo", "bar").unwrap();
         use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::metadata(secret_path("foo")).unwrap().permissions().mode();
-        assert_eq!(perms & 0o777, 0o600, "secret file must be 0600, got {:o}", perms);
+        let perms = std::fs::metadata(secret_path("foo"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(
+            perms & 0o777,
+            0o600,
+            "secret file must be 0600, got {:o}",
+            perms
+        );
     }
 
     #[test]
@@ -374,8 +404,14 @@ mod tests {
         SecretStore::set("format_test", "value").unwrap();
         let content = std::fs::read(secret_path("format_test")).unwrap();
         // Format: 12-byte nonce + ciphertext (which includes 16-byte GCM tag)
-        assert!(content.len() >= 12 + 16, "file must be at least 28 bytes (nonce + tag)");
-        assert!(content.len() <= 12 + 16 + 100, "file should not be excessively large for short value");
+        assert!(
+            content.len() >= 12 + 16,
+            "file must be at least 28 bytes (nonce + tag)"
+        );
+        assert!(
+            content.len() <= 12 + 16 + 100,
+            "file should not be excessively large for short value"
+        );
     }
 
     #[test]
@@ -405,7 +441,10 @@ mod tests {
         std::fs::write(&path, &content).unwrap();
 
         let result = SecretStore::get("corrupt_test");
-        assert!(result.is_err(), "decryption with corrupted ciphertext should fail");
+        assert!(
+            result.is_err(),
+            "decryption with corrupted ciphertext should fail"
+        );
     }
 
     #[test]

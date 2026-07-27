@@ -4,7 +4,7 @@
 //! the GitHub API to stop the codespace. Updates the state file with the new
 //! `last_known_state = "Shutdown"`.
 
-use crate::cli::{Cli, OutputEnvelope, print_envelope};
+use crate::cli::{print_envelope, Cli, OutputEnvelope};
 use crate::exec::run_pre_stop;
 use crate::manifest::Manifest;
 use crate::ssh::CodespaceSsh;
@@ -16,9 +16,10 @@ use super::common::{authed_client, load_manifest_for, resolve_gh_bin, resolve_te
 /// Handle the `stop` subcommand.
 pub async fn handle(args: &Cli) -> crate::Result<i32> {
     let (codespace_arg, skip_hooks) = match &args.command {
-        crate::cli::Commands::Stop { codespace, skip_hooks } => {
-            (codespace.clone(), *skip_hooks)
-        }
+        crate::cli::Commands::Stop {
+            codespace,
+            skip_hooks,
+        } => (codespace.clone(), *skip_hooks),
         _ => unreachable!("dispatch error: stop handler called for non-Stop command"),
     };
     let codespace = super::common::resolve_codespace_name(codespace_arg.as_deref())?;

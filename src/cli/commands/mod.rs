@@ -5,15 +5,15 @@
 //! dispatch by pattern-matching on `Commands` and forwarding.
 
 pub mod common;
-pub mod init;
-pub mod discover;
-pub mod switch;
 pub mod connect;
-pub mod health;
-pub mod exec;
-pub mod raw;
-pub mod stop;
-pub mod state;
-pub mod session;
+pub mod discover;
 pub mod doctor;
+pub mod exec;
+pub mod health;
+pub mod init;
+pub mod raw;
+pub mod session;
+pub mod state;
+pub mod stop;
+pub mod switch;
 pub mod token;

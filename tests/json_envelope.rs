@@ -31,8 +31,7 @@ fn test_json_envelope_parses_as_valid_json() {
     let mut cmd = cargo_bin();
     cmd.args(["--json", "doctor"]);
     let output = cmd.assert().get_output().stdout.clone();
-    serde_json::from_slice::<serde_json::Value>(&output)
-        .expect("doctor JSON output should parse");
+    serde_json::from_slice::<serde_json::Value>(&output).expect("doctor JSON output should parse");
 }
 
 /// The JSON envelope has `schema: "codespacectl/v1"`.
@@ -68,9 +67,7 @@ fn test_json_envelope_has_result_field() {
     let output = cmd.assert().get_output().stdout.clone();
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert!(
-        json["result"].is_object()
-            || json["result"].is_array()
-            || json["result"].is_null(),
+        json["result"].is_object() || json["result"].is_array() || json["result"].is_null(),
         "result should be object/array/null, got: {:?}",
         json["result"]
     );
@@ -165,10 +162,7 @@ fn test_json_envelope_error_kind_nonempty_string() {
     let kind = json["error"]["kind"]
         .as_str()
         .expect("error.kind should be a string");
-    assert!(
-        !kind.is_empty(),
-        "error.kind should be a non-empty string"
-    );
+    assert!(!kind.is_empty(), "error.kind should be a non-empty string");
 }
 
 /// On error, the `retryable` field is a boolean.
@@ -229,10 +223,7 @@ fn test_json_envelope_error_clears_result_and_warnings() {
         json["warnings"].is_array() && json["warnings"].as_array().unwrap().is_empty(),
         "warnings should be an empty array on error"
     );
-    assert!(
-        json["session"].is_null(),
-        "session should be null on error"
-    );
+    assert!(json["session"].is_null(), "session should be null on error");
 }
 
 /// The schema marker is consistent across success and error envelopes.

@@ -10,7 +10,7 @@
 //! the newly selected codespace.
 
 use crate::cli::args::*;
-use crate::cli::{OutputEnvelope, print_envelope};
+use crate::cli::{print_envelope, OutputEnvelope};
 use crate::state::{self, State};
 use crate::{CodespaceError, Result};
 use serde::Serialize;
@@ -27,7 +27,11 @@ struct SwitchResult {
     note: String,
 }
 
-pub async fn handle(args: &Cli, codespace_arg: &Option<String>, index_arg: &Option<usize>) -> Result<i32> {
+pub async fn handle(
+    args: &Cli,
+    codespace_arg: &Option<String>,
+    index_arg: &Option<usize>,
+) -> Result<i32> {
     // Wave 2: use the trait-injecting `authed_client()` helper (returns
     // `Arc<dyn GithubApiClient>`). `validate_token()` is already done inside
     // `authed_client()`, so we no longer call it explicitly here. Subsequent
@@ -51,7 +55,8 @@ pub async fn handle(args: &Cli, codespace_arg: &Option<String>, index_arg: &Opti
         if *idx == 0 || *idx > codespaces.len() {
             return Err(CodespaceError::CodespaceNotFound(format!(
                 "index {} out of range (1..={})",
-                idx, codespaces.len()
+                idx,
+                codespaces.len()
             )));
         }
         codespaces[idx - 1].name.clone()
@@ -85,7 +90,10 @@ pub async fn handle(args: &Cli, codespace_arg: &Option<String>, index_arg: &Opti
     } else {
         if let Some(prev) = &result.previous_codespace {
             if prev != &result.current_codespace {
-                println!("Switched codespace: {} -> {}", prev, result.current_codespace);
+                println!(
+                    "Switched codespace: {} -> {}",
+                    prev, result.current_codespace
+                );
             } else {
                 println!("Already on: {}", result.current_codespace);
             }
@@ -118,16 +126,18 @@ fn pick_interactively(
         let entries: Vec<serde_json::Value> = codespaces
             .iter()
             .enumerate()
-            .map(|(i, cs)| serde_json::json!({
-                "index": i + 1,
-                "name": cs.name,
-                "display_name": cs.display_name,
-                "state": cs.state.to_string(),
-                "repository": cs.repository.full_name,
-                "created_at": cs.created_at,
-                "last_used_at": cs.last_used_at,
-                "is_current": Some(cs.name.as_str()) == previous.as_deref(),
-            }))
+            .map(|(i, cs)| {
+                serde_json::json!({
+                    "index": i + 1,
+                    "name": cs.name,
+                    "display_name": cs.display_name,
+                    "state": cs.state.to_string(),
+                    "repository": cs.repository.full_name,
+                    "created_at": cs.created_at,
+                    "last_used_at": cs.last_used_at,
+                    "is_current": Some(cs.name.as_str()) == previous.as_deref(),
+                })
+            })
             .collect();
         let envelope = OutputEnvelope::success(&entries);
         print_envelope(envelope);
@@ -147,7 +157,11 @@ fn pick_interactively(
             };
             println!(
                 "{}{:<3} {:<40} {:<14} {:<32}",
-                marker, i + 1, truncate(&cs.name, 40), cs.state, truncate(&cs.repository.full_name, 32)
+                marker,
+                i + 1,
+                truncate(&cs.name, 40),
+                cs.state,
+                truncate(&cs.repository.full_name, 32)
             );
         }
         println!("\n(*) = current. Use `codespacectl switch --codespace <name>` or `--index <N>` to switch.");
@@ -158,16 +172,31 @@ fn pick_interactively(
     loop {
         println!("Available codespaces:");
         for (i, cs) in codespaces.iter().enumerate() {
-            let marker = if Some(cs.name.as_str()) == previous.as_deref() { "*" } else { " " };
-            println!("{}[{}] {} ({}, {})", marker, i + 1, cs.name, cs.state, cs.repository.full_name);
+            let marker = if Some(cs.name.as_str()) == previous.as_deref() {
+                "*"
+            } else {
+                " "
+            };
+            println!(
+                "{}[{}] {} ({}, {})",
+                marker,
+                i + 1,
+                cs.name,
+                cs.state,
+                cs.repository.full_name
+            );
         }
-        print!("\nEnter number to switch (1-{}) or 'q' to quit: ", codespaces.len());
+        print!(
+            "\nEnter number to switch (1-{}) or 'q' to quit: ",
+            codespaces.len()
+        );
         io::stdout().flush().ok();
 
         let mut line = String::new();
-        io::stdin().lock().read_line(&mut line).map_err(|e| {
-            CodespaceError::Internal(format!("failed to read stdin: {}", e))
-        })?;
+        io::stdin()
+            .lock()
+            .read_line(&mut line)
+            .map_err(|e| CodespaceError::Internal(format!("failed to read stdin: {}", e)))?;
         let line = line.trim();
         if line.eq_ignore_ascii_case("q") || line.is_empty() {
             return Ok(None);
@@ -177,7 +206,11 @@ fn pick_interactively(
                 return Ok(Some(codespaces[n - 1].name.clone()));
             }
             _ => {
-                eprintln!("Invalid input: {}. Please enter a number 1-{}.", line, codespaces.len());
+                eprintln!(
+                    "Invalid input: {}. Please enter a number 1-{}.",
+                    line,
+                    codespaces.len()
+                );
             }
         }
     }

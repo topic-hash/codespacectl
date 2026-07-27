@@ -66,7 +66,11 @@ pub enum CodespaceError {
     CodespaceUnreachable(String),
 
     #[error("health check failed: {check}")]
-    HealthCheckFailed { check: String, exit_code: i32, stderr: String },
+    HealthCheckFailed {
+        check: String,
+        exit_code: i32,
+        stderr: String,
+    },
 
     #[error("command timeout: {timeout_secs}s")]
     CommandTimeout { timeout_secs: u64 },
@@ -138,20 +142,34 @@ impl CodespaceError {
             Self::BinaryHashMismatch { .. } => "Re-download the binary from a trusted source",
             Self::AuthFailed(_) => "Regenerate the GitHub PAT and re-export CODESPACECTL_TOKEN",
             Self::TokenRevoked => "Regenerate the GitHub PAT and re-export CODESPACECTL_TOKEN",
-            Self::TokenInvalidScope { .. } => "Regenerate PAT with 'codespace' (and 'repo' if pushing) scope",
+            Self::TokenInvalidScope { .. } => {
+                "Regenerate PAT with 'codespace' (and 'repo' if pushing) scope"
+            }
             Self::TokenMissing => "Set CODESPACECTL_TOKEN env var or run `codespacectl token set`",
-            Self::CodespaceNotFound(_) => "Check the codespace name, or run `codespacectl discover`",
-            Self::CodespaceStartTimeout { .. } => "Retry with --timeout 600, or check status.github.com",
+            Self::CodespaceNotFound(_) => {
+                "Check the codespace name, or run `codespacectl discover`"
+            }
+            Self::CodespaceStartTimeout { .. } => {
+                "Retry with --timeout 600, or check status.github.com"
+            }
             Self::CodespaceUnreachable(_) => "Check network, or retry with --timeout 600",
-            Self::HealthCheckFailed { .. } => "Run `codespacectl doctor` on the codespace, or `codespacectl connect --force`",
-            Self::CommandTimeout { .. } => "Increase timeoutSecs in manifest, or run command in chunks",
+            Self::HealthCheckFailed { .. } => {
+                "Run `codespacectl doctor` on the codespace, or `codespacectl connect --force`"
+            }
+            Self::CommandTimeout { .. } => {
+                "Increase timeoutSecs in manifest, or run command in chunks"
+            }
             Self::CommandFailed { .. } => "Inspect the command output in the session log",
-            Self::HostKeyMismatch { .. } => "If codespace was rebuilt, run `codespacectl connect --accept-new-host-key`",
+            Self::HostKeyMismatch { .. } => {
+                "If codespace was rebuilt, run `codespacectl connect --accept-new-host-key`"
+            }
             Self::ManifestInvalid(_) => "Validate CODESPACE.yaml against docs/MANIFEST_SPEC.md",
             Self::ManifestVersionUnsupported(_) => "Upgrade codespacectl, or use apiVersion: v1",
             Self::ManifestNotFound(_) => "Provide path via --manifest, or run `codespacectl init`",
             Self::NetworkError(_) => "Check network and retry",
-            Self::Internal(_) => "Report a bug at https://github.com/topic-hash/codespacectl/issues",
+            Self::Internal(_) => {
+                "Report a bug at https://github.com/topic-hash/codespacectl/issues"
+            }
         }
     }
 
@@ -168,7 +186,11 @@ impl CodespaceError {
             Self::CodespaceStartTimeout { elapsed_secs } => Some(serde_json::json!({
                 "elapsed_secs": elapsed_secs,
             })),
-            Self::HealthCheckFailed { check, exit_code, stderr } => Some(serde_json::json!({
+            Self::HealthCheckFailed {
+                check,
+                exit_code,
+                stderr,
+            } => Some(serde_json::json!({
                 "check": check,
                 "exit_code": exit_code,
                 "stderr": stderr,
@@ -480,7 +502,11 @@ mod tests {
     #[case(CodespaceError::ManifestNotFound("/x".into()))]
     #[case(CodespaceError::Internal("x".into()))]
     fn test_non_retryable_variants(#[case] err: CodespaceError) {
-        assert!(!err.retryable(), "expected {} to NOT be retryable", err.kind());
+        assert!(
+            !err.retryable(),
+            "expected {} to NOT be retryable",
+            err.kind()
+        );
     }
 
     // -------------------- From<std::io::Error> --------------------
@@ -577,8 +603,14 @@ mod tests {
     #[test]
     fn test_from_reqwest_error_is_not_timeout_nor_connect() {
         let raw = make_invalid_url_reqwest_error();
-        assert!(!raw.is_timeout(), "invalid URL error should not be a timeout");
-        assert!(!raw.is_connect(), "invalid URL error should not be a connect error");
+        assert!(
+            !raw.is_timeout(),
+            "invalid URL error should not be a timeout"
+        );
+        assert!(
+            !raw.is_connect(),
+            "invalid URL error should not be a connect error"
+        );
     }
 
     // -------------------- ErrorEnvelope --------------------
@@ -591,7 +623,10 @@ mod tests {
         assert_eq!(env.retryable, true);
         assert!(!env.suggested_action.is_empty());
         // Context should be present (CodespaceStartTimeout has structured context).
-        assert!(env.context.is_some(), "context should be Some for CodespaceStartTimeout");
+        assert!(
+            env.context.is_some(),
+            "context should be Some for CodespaceStartTimeout"
+        );
         let ctx = env.context.unwrap();
         assert_eq!(ctx["elapsed_secs"], 42);
     }
@@ -602,7 +637,10 @@ mod tests {
         let env = ErrorEnvelope::from(&err);
         assert_eq!(env.kind, "token_missing");
         assert_eq!(env.retryable, false);
-        assert!(env.context.is_none(), "TokenMissing has no structured context");
+        assert!(
+            env.context.is_none(),
+            "TokenMissing has no structured context"
+        );
     }
 
     #[test]
@@ -639,10 +677,26 @@ mod tests {
         let err = CodespaceError::NetworkError("refused".into());
         let env = ErrorEnvelope::from(&err);
         let s = format!("{}", env);
-        assert!(s.contains("[network_error]"), "display should include kind, got: {}", s);
-        assert!(s.contains("refused"), "display should include message, got: {}", s);
-        assert!(s.contains("(retryable)"), "display should mark retryable, got: {}", s);
-        assert!(s.contains("→"), "display should include suggested action arrow, got: {}", s);
+        assert!(
+            s.contains("[network_error]"),
+            "display should include kind, got: {}",
+            s
+        );
+        assert!(
+            s.contains("refused"),
+            "display should include message, got: {}",
+            s
+        );
+        assert!(
+            s.contains("(retryable)"),
+            "display should mark retryable, got: {}",
+            s
+        );
+        assert!(
+            s.contains("→"),
+            "display should include suggested action arrow, got: {}",
+            s
+        );
     }
 
     #[test]
@@ -650,7 +704,11 @@ mod tests {
         let err = CodespaceError::TokenMissing;
         let env = ErrorEnvelope::from(&err);
         let s = format!("{}", env);
-        assert!(!s.contains("(retryable)"), "non-retryable display should not include marker, got: {}", s);
+        assert!(
+            !s.contains("(retryable)"),
+            "non-retryable display should not include marker, got: {}",
+            s
+        );
     }
 
     // -------------------- context() --------------------
@@ -671,22 +729,45 @@ mod tests {
             CodespaceError::Internal("x".into()),
         ];
         for err in simple_variants {
-            assert!(err.context().is_none(), "{} should have no context", err.kind());
+            assert!(
+                err.context().is_none(),
+                "{} should have no context",
+                err.kind()
+            );
         }
     }
 
     #[test]
     fn test_context_returns_some_for_structured_variants() {
         let structured_variants: Vec<CodespaceError> = vec![
-            CodespaceError::BinaryHashMismatch { expected: "a".into(), actual: "b".into() },
-            CodespaceError::TokenInvalidScope { scope: "repo".into() },
+            CodespaceError::BinaryHashMismatch {
+                expected: "a".into(),
+                actual: "b".into(),
+            },
+            CodespaceError::TokenInvalidScope {
+                scope: "repo".into(),
+            },
             CodespaceError::CodespaceStartTimeout { elapsed_secs: 5 },
-            CodespaceError::HealthCheckFailed { check: "c".into(), exit_code: 1, stderr: "s".into() },
-            CodespaceError::CommandFailed { exit_code: 1, stderr: "s".into() },
-            CodespaceError::HostKeyMismatch { expected: "a".into(), actual: "b".into() },
+            CodespaceError::HealthCheckFailed {
+                check: "c".into(),
+                exit_code: 1,
+                stderr: "s".into(),
+            },
+            CodespaceError::CommandFailed {
+                exit_code: 1,
+                stderr: "s".into(),
+            },
+            CodespaceError::HostKeyMismatch {
+                expected: "a".into(),
+                actual: "b".into(),
+            },
         ];
         for err in structured_variants {
-            assert!(err.context().is_some(), "{} should have context", err.kind());
+            assert!(
+                err.context().is_some(),
+                "{} should have context",
+                err.kind()
+            );
         }
     }
 
@@ -738,7 +819,9 @@ mod tests {
 
     #[test]
     fn test_context_token_invalid_scope_fields() {
-        let err = CodespaceError::TokenInvalidScope { scope: "repo".into() };
+        let err = CodespaceError::TokenInvalidScope {
+            scope: "repo".into(),
+        };
         let ctx = err.context().unwrap();
         assert_eq!(ctx["missing_scope"], "repo");
     }

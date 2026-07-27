@@ -29,7 +29,10 @@ fn test_init_nonexistent_path_fails() {
         .env_remove("CODESPACECTL_TOKEN");
     let assert = cmd.assert().failure();
     let code = assert.get_output().status.code().expect("exit code");
-    assert_eq!(code, 65, "init with nonexistent path should exit 65 (config)");
+    assert_eq!(
+        code, 65,
+        "init with nonexistent path should exit 65 (config)"
+    );
 }
 
 /// `codespacectl --json init /nonexistent/path.yaml` returns an error
@@ -183,14 +186,10 @@ fn test_state_ignores_nonexistent_manifest_flag() {
     let (_cfg_tmp, config_home) = temp_config_dir();
     let (_cache_tmp, cache_home) = temp_state_dir();
     let mut cmd = cargo_bin();
-    cmd.args([
-        "--manifest",
-        "/nonexistent/CODESPACE.yaml",
-        "state",
-    ])
-    .env("XDG_CONFIG_HOME", &config_home)
-    .env("XDG_CACHE_HOME", &cache_home)
-    .env_remove("CODESPACECTL_TOKEN");
+    cmd.args(["--manifest", "/nonexistent/CODESPACE.yaml", "state"])
+        .env("XDG_CONFIG_HOME", &config_home)
+        .env("XDG_CACHE_HOME", &cache_home)
+        .env_remove("CODESPACECTL_TOKEN");
     cmd.assert().success();
 }
 

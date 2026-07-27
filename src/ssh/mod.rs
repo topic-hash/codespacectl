@@ -7,13 +7,13 @@
 //!
 //! Wave 4 subagent: implement the methods declared below.
 
-pub mod transport;
-pub mod host_keys;
 pub mod exec;
+pub mod host_keys;
+pub mod transport;
 
-pub use transport::{SshTransport, connect_codespace, CodespaceSsh};
-pub use host_keys::{HostKeyStore, HostKeyError};
-pub use exec::{ExecResult, ExecError};
+pub use exec::{ExecError, ExecResult};
+pub use host_keys::{HostKeyError, HostKeyStore};
+pub use transport::{connect_codespace, CodespaceSsh, SshTransport};
 
 /// Configuration for an SSH session.
 #[derive(Debug, Clone)]

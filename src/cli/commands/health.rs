@@ -4,7 +4,7 @@
 //! the resulting report. Exits 0 if all checks pass ("green"), 1 if any fail
 //! ("red").
 
-use crate::cli::{Cli, OutputEnvelope, SessionRef, print_envelope};
+use crate::cli::{print_envelope, Cli, OutputEnvelope, SessionRef};
 use crate::health::{run_all_checks, HealthStatus};
 use crate::session::SessionLog;
 use crate::ssh::CodespaceSsh;
@@ -67,7 +67,11 @@ pub async fn handle(args: &Cli) -> crate::Result<i32> {
     // Close SSH.
     ssh.close().await.ok();
 
-    let exit = if report.overall == HealthStatus::Green { 0 } else { 1 };
+    let exit = if report.overall == HealthStatus::Green {
+        0
+    } else {
+        1
+    };
 
     if args.json {
         let env = OutputEnvelope::success_with_session(

@@ -323,10 +323,7 @@ mod tests {
         assert_eq!(json["stderr"], "warn: deprecated flag\n");
         assert_eq!(json["exit_code"], 0);
         assert_eq!(json["duration_secs"], 1.5);
-        assert_eq!(
-            json["session_id"],
-            "11111111-2222-3333-4444-555555555555"
-        );
+        assert_eq!(json["session_id"], "11111111-2222-3333-4444-555555555555");
     }
 
     // -----------------------------------------------------------------------
@@ -358,9 +355,7 @@ mod tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_classify_ssh_err_converts_internal_timeout() {
-        let e = CodespaceError::Internal(
-            "ssh error: exec read loop timed out after 30s".into(),
-        );
+        let e = CodespaceError::Internal("ssh error: exec read loop timed out after 30s".into());
         let classified = classify_ssh_err(e, 30);
         assert!(matches!(
             classified,
@@ -410,7 +405,9 @@ mod tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_is_timeout() {
-        assert!(is_timeout(&CodespaceError::CommandTimeout { timeout_secs: 5 }));
+        assert!(is_timeout(&CodespaceError::CommandTimeout {
+            timeout_secs: 5
+        }));
         assert!(!is_timeout(&CodespaceError::CommandFailed {
             exit_code: 1,
             stderr: String::new(),
@@ -591,9 +588,15 @@ mod tests {
     // -----------------------------------------------------------------------
     #[test]
     fn test_is_timeout_true_for_command_timeout() {
-        assert!(is_timeout(&CodespaceError::CommandTimeout { timeout_secs: 5 }));
-        assert!(is_timeout(&CodespaceError::CommandTimeout { timeout_secs: 0 }));
-        assert!(is_timeout(&CodespaceError::CommandTimeout { timeout_secs: 9999 }));
+        assert!(is_timeout(&CodespaceError::CommandTimeout {
+            timeout_secs: 5
+        }));
+        assert!(is_timeout(&CodespaceError::CommandTimeout {
+            timeout_secs: 0
+        }));
+        assert!(is_timeout(&CodespaceError::CommandTimeout {
+            timeout_secs: 9999
+        }));
     }
 
     // -----------------------------------------------------------------------

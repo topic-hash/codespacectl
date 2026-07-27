@@ -6,7 +6,7 @@
 //! `--skip-health`). The SSH session is closed at the end (subsequent
 //! `exec`/`raw`/`health` commands open a fresh one).
 
-use crate::cli::{Cli, OutputEnvelope, SessionRef, print_envelope};
+use crate::cli::{print_envelope, Cli, OutputEnvelope, SessionRef};
 use crate::exec::run_post_start;
 use crate::health::{run_all_checks, HealthReport};
 use crate::manifest::{manifest_sha256, Manifest};
@@ -17,9 +17,7 @@ use crate::state::{load_state, save_state};
 use serde::Serialize;
 use std::time::Duration;
 
-use super::common::{
-    authed_client, load_manifest_for, resolve_gh_bin, resolve_template_context,
-};
+use super::common::{authed_client, load_manifest_for, resolve_gh_bin, resolve_template_context};
 
 /// JSON-serializable result for the `connect` command.
 #[derive(Debug, Serialize)]
@@ -92,10 +90,7 @@ pub async fn handle(args: &Cli) -> crate::Result<i32> {
     if let Some(fp) = &incoming_fp {
         let cs_state_ref = {
             let st = load_state()?;
-            st.codespaces
-                .get(&codespace)
-                .cloned()
-                .unwrap_or_default()
+            st.codespaces.get(&codespace).cloned().unwrap_or_default()
         };
         let decision = host_keys::decide(fp, &cs_state_ref, accept_new);
         host_key_decision_str = match &decision {

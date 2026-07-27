@@ -60,17 +60,20 @@ impl<T> OutputEnvelope<T> {
 
 /// Print the envelope as JSON to stdout (for --json mode).
 pub fn print_envelope<T: Serialize>(envelope: OutputEnvelope<T>) {
-    println!("{}", serde_json::to_string_pretty(&envelope).unwrap_or_else(|e| {
-        serde_json::json!({
-            "schema": "codespacectl/v1",
-            "ok": false,
-            "error": {
-                "kind": "internal_error",
-                "message": format!("failed to serialize envelope: {}", e),
-                "retryable": false,
-                "suggested_action": "report a bug"
-            }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&envelope).unwrap_or_else(|e| {
+            serde_json::json!({
+                "schema": "codespacectl/v1",
+                "ok": false,
+                "error": {
+                    "kind": "internal_error",
+                    "message": format!("failed to serialize envelope: {}", e),
+                    "retryable": false,
+                    "suggested_action": "report a bug"
+                }
+            })
+            .to_string()
         })
-        .to_string()
-    }));
+    );
 }

@@ -33,8 +33,7 @@ fn test_json_state_envelope() {
     cmd.args(["--json", "state"])
         .env("XDG_CACHE_HOME", &cache_home);
     let output = cmd.assert().success().get_output().stdout.clone();
-    let json: serde_json::Value =
-        serde_json::from_slice(&output).expect("valid JSON envelope");
+    let json: serde_json::Value = serde_json::from_slice(&output).expect("valid JSON envelope");
     assert_eq!(json["schema"], "codespacectl/v1");
     assert_eq!(json["ok"], true);
     assert!(json["result"]["state_file"].is_string());
@@ -107,8 +106,13 @@ fn test_state_import_nonexistent_fails() {
 fn test_json_state_import_nonexistent_envelope_kind() {
     let (_tmp, cache_home) = temp_state_dir();
     let mut cmd = cargo_bin();
-    cmd.args(["--json", "state", "--import", "/nonexistent/path/to/import.json"])
-        .env("XDG_CACHE_HOME", &cache_home);
+    cmd.args([
+        "--json",
+        "state",
+        "--import",
+        "/nonexistent/path/to/import.json",
+    ])
+    .env("XDG_CACHE_HOME", &cache_home);
     let output = cmd.assert().failure().get_output().stdout.clone();
     let json: serde_json::Value =
         serde_json::from_slice(&output).expect("valid JSON envelope on error");
@@ -140,19 +144,16 @@ fn test_state_import_replaces_state_file() {
     std::fs::write(&import_path, &import_content).unwrap();
 
     let mut cmd = cargo_bin();
-    cmd.args([
-        "state",
-        "--import",
-        import_path.to_str().unwrap(),
-    ])
-    .env("XDG_CACHE_HOME", &cache_home);
+    cmd.args(["state", "--import", import_path.to_str().unwrap()])
+        .env("XDG_CACHE_HOME", &cache_home);
     cmd.assert().success();
 
     // Verify the state file now contains the imported current_codespace.
-    let state_file =
-        std::path::Path::new(&cache_home).join("codespacectl").join("state.json");
-    let content = std::fs::read_to_string(&state_file)
-        .expect("state file should exist after import");
+    let state_file = std::path::Path::new(&cache_home)
+        .join("codespacectl")
+        .join("state.json");
+    let content =
+        std::fs::read_to_string(&state_file).expect("state file should exist after import");
     let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
     assert_eq!(parsed["current_codespace"], "imported-test-codespace");
     assert_eq!(parsed["current_manifest"], "/tmp/imported-manifest.yaml");
@@ -174,13 +175,8 @@ fn test_json_state_import_success_envelope() {
     std::fs::write(&import_path, &import_content).unwrap();
 
     let mut cmd = cargo_bin();
-    cmd.args([
-        "--json",
-        "state",
-        "--import",
-        import_path.to_str().unwrap(),
-    ])
-    .env("XDG_CACHE_HOME", &cache_home);
+    cmd.args(["--json", "state", "--import", import_path.to_str().unwrap()])
+        .env("XDG_CACHE_HOME", &cache_home);
     let output = cmd.assert().success().get_output().stdout.clone();
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
     assert_eq!(json["ok"], true);

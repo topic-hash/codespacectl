@@ -13,8 +13,8 @@ pub mod exec;
 pub mod github;
 pub mod health;
 pub mod manifest;
-pub mod session;
 pub mod secrets;
+pub mod session;
 pub mod ssh;
 pub mod state;
 

@@ -4,8 +4,8 @@
 //! `validate_manifest` per the spec in `docs/MANIFEST_SPEC.md`.
 
 use super::schema::Manifest;
-use std::path::Path;
 use crate::Result;
+use std::path::Path;
 
 /// Parse a manifest from a YAML string.
 pub fn parse_manifest(content: &str) -> Result<Manifest> {
@@ -16,12 +16,9 @@ pub fn parse_manifest(content: &str) -> Result<Manifest> {
 
 /// Load and parse a manifest from a file path.
 pub fn parse_manifest_from_file(path: &Path) -> Result<Manifest> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| crate::CodespaceError::ManifestInvalid(format!(
-            "failed to read {}: {}",
-            path.display(),
-            e
-        )))?;
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        crate::CodespaceError::ManifestInvalid(format!("failed to read {}: {}", path.display(), e))
+    })?;
     parse_manifest(&content)
 }
 
@@ -48,7 +45,10 @@ pub fn validate_manifest(manifest: &Manifest) -> Result<()> {
             "metadata.name must be non-empty".into(),
         ));
     }
-    if !name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
         return Err(crate::CodespaceError::ManifestInvalid(format!(
             "metadata.name must match [a-z0-9-]+, got: {}",
             name
@@ -109,10 +109,8 @@ pub fn validate_manifest(manifest: &Manifest) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::schema::{Command, Environment, HealthCheck, Metadata, Secret};
     use super::*;
-    use super::super::schema::{
-        Command, Environment, HealthCheck, Metadata, Secret,
-    };
     use std::collections::HashMap;
 
     /// A minimal valid manifest — only the fields the schema requires.
@@ -462,7 +460,11 @@ environment:
     fn test_parse_manifest_from_file_errors_on_invalid_content() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = tmp.path().join("CODESPACE.yaml");
-        std::fs::write(&path, "apiVersion: v2\nmetadata:\n  name: x\nenvironment:\n  workingDir: /x\n").unwrap();
+        std::fs::write(
+            &path,
+            "apiVersion: v2\nmetadata:\n  name: x\nenvironment:\n  workingDir: /x\n",
+        )
+        .unwrap();
         let err = parse_manifest_from_file(&path).unwrap_err();
         assert_eq!(err.kind(), "manifest_version_unsupported");
     }
@@ -605,8 +607,16 @@ environment:
                 working_dir: "/x".into(),
                 health_checks: vec![],
                 secrets: vec![
-                    Secret { name: "DUP".into(), required: false, generate_if_missing: None },
-                    Secret { name: "DUP".into(), required: false, generate_if_missing: None },
+                    Secret {
+                        name: "DUP".into(),
+                        required: false,
+                        generate_if_missing: None,
+                    },
+                    Secret {
+                        name: "DUP".into(),
+                        required: false,
+                        generate_if_missing: None,
+                    },
                 ],
             },
             commands: HashMap::new(),
