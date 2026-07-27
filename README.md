@@ -21,10 +21,35 @@ and 132-line agent prompts with:
 
 ### Install
 
+No sudo required. The bootstrap script auto-detects your platform, downloads
+the matching static musl/darwin/windows binary from the latest GitHub Release,
+verifies the SHA-256 against the published `SHA256SUMS.txt`, and installs to
+`~/.local/bin/codespacectl` (with a cache at `~/.cache/codespacectl/bin/`).
+
 ```bash
-curl -L https://github.com/topic-hash/codespacectl/releases/latest/download/codespacectl-linux-amd64 \
-  -o /usr/local/bin/codespacectl && chmod +x $_
+curl -fsSL https://github.com/topic-hash/codespacectl/raw/main/scripts/bootstrap.sh | bash
+# Add ~/.local/bin to PATH if not already there:
+#   echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 ```
+
+Options: pin a version (`--version v0.1.0`), force re-download (`--upgrade`),
+or override the install location (`--install-dir /opt/bin`).
+
+<details>
+<summary>Manual install (no bootstrap script)</summary>
+
+```bash
+# 1. Pick your target: x86_64-unknown-linux-musl | aarch64-unknown-linux-musl
+#    | x86_64-apple-darwin | aarch64-apple-darwin | x86_64-pc-windows-gnu
+# 2. Download from the latest release:
+curl -L -o codespacectl.tar.gz \
+  https://github.com/topic-hash/codespacectl/releases/latest/download/codespacectl-<target>.tar.gz
+# 3. Verify the SHA-256 against SHA256SUMS.txt from the same release.
+# 4. Extract and install:
+tar xzf codespacectl.tar.gz
+install -m 0755 codespacectl ~/.local/bin/codespacectl
+```
+</details>
 
 ### Set your GitHub token
 
