@@ -50,10 +50,12 @@ jobs:
         if: matrix.target == 'x86_64-pc-windows-gnu'
         run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
       - name: Build
+        # Cargo.toml [profile.release] has strip = true, so the binary is
+        # already stripped at build time. No explicit strip step needed —
+        # and an explicit `strip` would fail on cross-compiled targets
+        # (e.g. aarch64-linux-musl on an x86_64 runner) because the host
+        # strip can't process foreign-arch ELF binaries.
         run: cargo +1.85.0 build --release --locked --target ${{ matrix.target }}
-      - name: Strip (non-Windows)
-        if: matrix.archive != 'zip'
-        run: strip target/${{ matrix.target }}/release/codespacectl
       - name: Package (tar.gz)
         if: matrix.archive == 'tar.gz'
         run: |
