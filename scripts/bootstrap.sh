@@ -6,8 +6,10 @@
 # codespacectl itself. No sudo. No system packages. Single static binary.
 #
 # Lookup order (first match wins):
+#   0. Bundled binary in scripts/bundle/ matching current platform (offline)
 #   1. $CODESPACECTL_BIN env var (explicit override)
 #   2. Existing install at $INSTALL_DIR/codespacectl (skip unless --upgrade)
+#      - Platform mismatch: auto-delete stale binary and re-download
 #   3. Cache at $CACHE_DIR/codespacectl
 #   4. Download from GitHub Releases + verify SHA-256 + install
 #
@@ -36,7 +38,7 @@ set -euo pipefail
 REPO="topic-hash/codespacectl"
 INSTALL_DIR="${HOME}/.local/bin"
 CACHE_DIR="${HOME}/.cache/codespacectl/bin"
-VERSION=""        # empty → query /releases/latest
+VERSION=""        # empty -> query /releases/latest
 UPGRADE=0
 VERBOSE=0
 
@@ -94,16 +96,158 @@ binary_name() {
   esac
 }
 
+# Detect platform of an existing ELF/Mach-O binary.
+# Returns the target triple if detectable, empty string otherwise.
+detect_binary_platform() {
+  local bin="$1"
+  [[ ! -f "$bin" ]] && return 0
+
+  # Try ELF (Linux)
+  if file "$bin" 2>/dev/null | grep -qi "ELF"; then
+    local arch machine
+    arch="$(file "$bin" 2>/dev/null | grep -oi 'ELF [0-9]+-bit' || true)"
+    machine="$(file "$bin" 2>/dev/null | grep -oi 'X86-64\|ARM aarch64\|80386' || true)"
+
+    if echo "$machine" | grep -qi "X86-64"; then
+      # Check for musl vs gnu
+      if ldd "$bin" 2>/dev/null | grep -qi "musl\|not a dynamic executable\|statically linked"; then
+        echo "x86_64-unknown-linux-musl"
+      else
+        echo "x86_64-unknown-linux-gnu"
+      fi
+    elif echo "$machine" | grep -qi "ARM aarch64"; then
+      echo "aarch64-unknown-linux-musl"
+    fi
+    return 0
+  fi
+
+  # Try Mach-O (macOS)
+  if file "$bin" 2>/dev/null | grep -qi "Mach-O"; then
+    if file "$bin" 2>/dev/null | grep -qi "x86_64"; then
+      echo "x86_64-apple-darwin"
+    elif file "$bin" 2>/dev/null | grep -qi "arm64"; then
+      echo "aarch64-apple-darwin"
+    fi
+    return 0
+  fi
+
+  # Try PE (Windows)
+  if file "$bin" 2>/dev/null | grep -qi "PE32+\|PE32"; then
+    echo "x86_64-pc-windows-gnu"
+    return 0
+  fi
+}
+
 # --- main -------------------------------------------------------------------
 TARGET="$(detect_target)"
 EXT="$(archive_ext "$TARGET")"
 BIN_NAME="$(binary_name "$TARGET")"
 ASSET="codespacectl-${VERSION}-${TARGET}.${EXT}"
 
-# Resolve version if not pinned.
-# Prefer the HTML redirect endpoint (no API call, no rate limit, 60→inf).
-# Fall back to the REST API if the redirect fails (e.g. behind a proxy that
-# strips redirects).
+# =============================================================================
+# EARLY EXIT TIERS (0-2): no network needed
+# These run BEFORE any version resolution to avoid unnecessary GitHub calls.
+# =============================================================================
+
+# --- tier 0: bundled binary (repo ships pre-compiled binaries for common
+#     targets — zero network, zero download, ideal for sandboxes / CI) ------
+# Determine bundle dir: look for scripts/bundle/ relative to this script,
+# then fall back to the repo root if bootstrapped from a clone.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUNDLE_DIR="${SCRIPT_DIR}/bundle"
+if [[ ! -d "$BUNDLE_DIR" ]]; then
+  BUNDLE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)/scripts/bundle"
+fi
+
+if [[ -d "$BUNDLE_DIR" && $UPGRADE -eq 0 ]]; then
+  BUNDLED_BIN="${BUNDLE_DIR}/codespacectl-${TARGET}"
+  if [[ -x "$BUNDLED_BIN" ]]; then
+    log "found bundled binary for ${TARGET} at ${BUNDLED_BIN}"
+    # Verify against MANIFEST.json if present
+    if [[ -f "${BUNDLE_DIR}/MANIFEST.json" ]]; then
+      BUNDLED_SHA="$(sha256sum "$BUNDLED_BIN" | awk '{print $1}')"
+      EXPECTED_BUNDLED_SHA="$(python3 -c "
+import json, sys
+with open('${BUNDLE_DIR}/MANIFEST.json') as f:
+    manifest = json.load(f)
+for b in manifest.get('binaries', []):
+    if b.get('target') == '${TARGET}':
+        print(b.get('sha256', ''))
+        sys.exit(0)
+" 2>/dev/null || true)"
+      if [[ -n "$EXPECTED_BUNDLED_SHA" && "$BUNDLED_SHA" != "$EXPECTED_BUNDLED_SHA" ]]; then
+        log "bundled binary sha256 mismatch (expected ${EXPECTED_BUNDLED_SHA}, got ${BUNDLED_SHA}), skipping"
+      else
+        log "bundled binary sha256 verified"
+        mkdir -p "$INSTALL_DIR"
+        cp "$BUNDLED_BIN" "${INSTALL_DIR}/${BIN_NAME}"
+        chmod 0755 "${INSTALL_DIR}/${BIN_NAME}"
+        note "installed ${INSTALL_DIR}/${BIN_NAME} (from bundled binary)"
+        echo "${INSTALL_DIR}/${BIN_NAME}"
+        exit 0
+      fi
+    else
+      # No manifest — trust the binary (local dev / trusted clone)
+      mkdir -p "$INSTALL_DIR"
+      cp "$BUNDLED_BIN" "${INSTALL_DIR}/${BIN_NAME}"
+      chmod 0755 "${INSTALL_DIR}/${BIN_NAME}"
+      note "installed ${INSTALL_DIR}/${BIN_NAME} (from bundled binary, no manifest)"
+      echo "${INSTALL_DIR}/${BIN_NAME}"
+      exit 0
+    fi
+  fi
+fi
+
+# --- tier 1: explicit env override -----------------------------------------
+if [[ -n "${CODESPACECTL_BIN:-}" && -x "${CODESPACECTL_BIN}" && $UPGRADE -eq 0 ]]; then
+  # Check platform mismatch for env override
+  BIN_PLATFORM="$(detect_binary_platform "${CODESPACECTL_BIN}")"
+  if [[ -n "$BIN_PLATFORM" && "$BIN_PLATFORM" != "$TARGET" ]]; then
+    log "CODESPACECTL_BIN binary is for ${BIN_PLATFORM}, current system is ${TARGET} — skipping"
+  else
+    note "found \$CODESPACECTL_BIN at ${CODESPACECTL_BIN}, nothing to do"
+    echo "${CODESPACECTL_BIN}"
+    exit 0
+  fi
+fi
+
+# --- tier 2: existing install at INSTALL_DIR -------------------------------
+EXISTING="${INSTALL_DIR}/${BIN_NAME}"
+if [[ -x "$EXISTING" && $UPGRADE -eq 0 ]]; then
+  # Platform mismatch detection: if the installed binary is for a different
+  # architecture, remove it and fall through to download the correct one.
+  BIN_PLATFORM="$(detect_binary_platform "$EXISTING")"
+  if [[ -n "$BIN_PLATFORM" && "$BIN_PLATFORM" != "$TARGET" ]]; then
+    note "installed binary is for ${BIN_PLATFORM}, current system is ${TARGET} — removing stale binary"
+    rm -f "$EXISTING"
+    # Also remove cache if present
+    CACHE_BIN_OLD="${CACHE_DIR}/${BIN_NAME}"
+    if [[ -f "$CACHE_BIN_OLD" ]]; then
+      log "also removing stale cache entry at ${CACHE_BIN_OLD}"
+      rm -f "$CACHE_BIN_OLD" "${CACHE_BIN_OLD}.sha256"
+    fi
+  else
+    # Same platform — check version (requires knowing the latest version)
+    # For now, skip version check if version not yet resolved.
+    # We'll come back to this after version resolution if needed.
+    if [[ -n "$VERSION" ]]; then
+      INSTALLED_VER="$("$EXISTING" --version 2>/dev/null | awk '{print $2}' || true)"
+      if [[ "$INSTALLED_VER" == "${VERSION#v}" ]]; then
+        note "already installed at ${EXISTING} (${VERSION}), nothing to do"
+        echo "$EXISTING"
+        exit 0
+      fi
+      log "existing install is ${INSTALLED_VER:-unknown}, upgrading to ${VERSION}"
+    fi
+    # Version not resolved yet but binary is correct platform — save this
+    # for post-resolution check below
+    EXISTING_OK_PLATFORM=1
+  fi
+fi
+
+# =============================================================================
+# VERSION RESOLUTION (network — only reached if early exits didn't match)
+# =============================================================================
 if [[ -z "$VERSION" ]]; then
   log "resolving latest release tag via redirect"
   VERSION="$(curl -fsIL -o /dev/null -w '%{url_effective}' \
@@ -123,16 +267,10 @@ if [[ -z "$VERSION" ]]; then
 fi
 note "installing codespacectl ${VERSION} for ${TARGET}"
 
-# --- tier 1: explicit env override -----------------------------------------
-if [[ -n "${CODESPACECTL_BIN:-}" && -x "${CODESPACECTL_BIN}" && $UPGRADE -eq 0 ]]; then
-  note "found \$CODESPACECTL_BIN at ${CODESPACECTL_BIN}, nothing to do"
-  echo "${CODESPACECTL_BIN}"
-  exit 0
-fi
-
-# --- tier 2: existing install at INSTALL_DIR -------------------------------
-EXISTING="${INSTALL_DIR}/${BIN_NAME}"
-if [[ -x "$EXISTING" && $UPGRADE -eq 0 ]]; then
+# --- tier 2 (retry): version-gated check for existing install ----------------
+# If we had a correct-platform binary but couldn't check version earlier,
+# check it now that we have the version.
+if [[ "${EXISTING_OK_PLATFORM:-0}" -eq 1 && -x "$EXISTING" && $UPGRADE -eq 0 ]]; then
   INSTALLED_VER="$("$EXISTING" --version 2>/dev/null | awk '{print $2}' || true)"
   if [[ "$INSTALLED_VER" == "${VERSION#v}" ]]; then
     note "already installed at ${EXISTING} (${VERSION}), nothing to do"
@@ -146,15 +284,22 @@ fi
 CACHE_BIN="${CACHE_DIR}/${BIN_NAME}"
 CACHE_SHA="${CACHE_DIR}/${BIN_NAME}.sha256"
 if [[ -x "$CACHE_BIN" && $UPGRADE -eq 0 ]]; then
-  CACHED_VER="$("$CACHE_BIN" --version 2>/dev/null | awk '{print $2}' || true)"
-  if [[ "$CACHED_VER" == "${VERSION#v}" ]]; then
-    log "cache hit at ${CACHE_BIN}"
-    mkdir -p "$INSTALL_DIR"
-    cp "$CACHE_BIN" "$EXISTING"
-    chmod 0755 "$EXISTING"
-    note "installed ${EXISTING} (from cache)"
-    echo "$EXISTING"
-    exit 0
+  # Verify cache binary matches current platform
+  CACHE_PLATFORM="$(detect_binary_platform "$CACHE_BIN")"
+  if [[ -n "$CACHE_PLATFORM" && "$CACHE_PLATFORM" != "$TARGET" ]]; then
+    log "cache binary is for ${CACHE_PLATFORM}, current system is ${TARGET} — removing stale cache"
+    rm -f "$CACHE_BIN" "${CACHE_SHA}"
+  else
+    CACHED_VER="$("$CACHE_BIN" --version 2>/dev/null | awk '{print $2}' || true)"
+    if [[ "$CACHED_VER" == "${VERSION#v}" ]]; then
+      log "cache hit at ${CACHE_BIN}"
+      mkdir -p "$INSTALL_DIR"
+      cp "$CACHE_BIN" "$EXISTING"
+      chmod 0755 "$EXISTING"
+      note "installed ${EXISTING} (from cache)"
+      echo "$EXISTING"
+      exit 0
+    fi
   fi
 fi
 

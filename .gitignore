@@ -20,3 +20,7 @@ token
 # or auto-fetched when CODESPACECTL_GH_BIN is not set.
 tools/bin/gh
 tools/bin/gh-*
+
+# scripts/bundle/ binaries ARE committed (pre-compiled for common sandbox targets).
+# If you add a new binary, update scripts/bundle/MANIFEST.json and re-run
+# scripts/update-bundle.sh to regenerate checksums.

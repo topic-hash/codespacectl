@@ -1,0 +1,11 @@
+{
+  "$schema": "https://github.com/topic-hash/codespacectl/schemas/bundle-manifest-v1",
+  "version": "v0.1.0",
+  "binaries": [
+    {
+      "target": "x86_64-unknown-linux-musl",
+      "file": "codespacectl-x86_64-unknown-linux-musl",
+      "sha256": "611e21a17b6096b9fc327e5db3fa4f58cc0d86dfdc5a8967c4cb1cf6a54ef097"
+    }
+  ]
+}

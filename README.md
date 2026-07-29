@@ -21,10 +21,9 @@ and 132-line agent prompts with:
 
 ### Install
 
-No sudo required. The bootstrap script auto-detects your platform, downloads
-the matching static musl/darwin/windows binary from the latest GitHub Release,
-verifies the SHA-256 against the published `SHA256SUMS.txt`, and installs to
-`~/.local/bin/codespacectl` (with a cache at `~/.cache/codespacectl/bin/`).
+No sudo required. The bootstrap script resolves a binary through a tiered
+lookup — bundled pre-compiled binaries first (zero network), then local install,
+then cache, then GitHub Releases download with SHA-256 verification.
 
 ```bash
 curl -fsSL https://github.com/topic-hash/codespacectl/raw/main/scripts/bootstrap.sh | bash
@@ -34,6 +33,12 @@ curl -fsSL https://github.com/topic-hash/codespacectl/raw/main/scripts/bootstrap
 
 Options: pin a version (`--version v0.1.0`), force re-download (`--upgrade`),
 or override the install location (`--install-dir /opt/bin`).
+
+**Agent-friendly:** If you have the repo cloned (e.g. in a sandbox), running the
+bootstrap script from `scripts/bootstrap.sh` installs from the bundled binary
+in ~40ms with zero network calls. If the installed binary is for the wrong
+platform (e.g. sandbox switched from x86_64 to arm64), it is automatically
+removed and replaced with the correct one.
 
 <details>
 <summary>Manual install (no bootstrap script)</summary>
